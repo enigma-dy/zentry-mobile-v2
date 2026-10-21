@@ -48,3 +48,42 @@ app.*.map.json
 .env
 .env.*
 !.env.example
+
+# Dependency, tool, and build caches (including nested projects)
+.dart_tool/
+.flutter-plugins
+build/
+coverage/
+.gradle/
+.kotlin/
+.cxx/
+.externalNativeBuild/
+.cache/
+node_modules/
+.vs/
+.vscode/
+
+# Generated Flutter plugin registration (recreated by flutter pub get)
+**/flutter/generated_plugin_registrant.*
+**/flutter/generated_plugins.cmake
+/macos/Flutter/GeneratedPluginRegistrant.swift
+
+# Apple dependency and build outputs
+Pods/
+.symlinks/
+DerivedData/
+xcuserdata/
+**/Flutter/ephemeral/
+
+# Local Android SDK and signing configuration
+**/local.properties
+**/key.properties
+*.jks
+*.keystore
+
+# Packaged build outputs
+*.apk
+*.aab
+*.ipa
+*.dSYM/
+*.dSYM.zip
