@@ -1157,6 +1157,23 @@ HomeOddsOption? homePredictionOption(
           }.contains(market)
       ? '$market ${_lineLabel(line)}'
       : market;
+  if (!fixture.hasPrematchMarketSnapshot && prediction.oddsPhase != 'prematch')
+    return null;
+  if (prediction.oddsSource.isNotEmpty || prediction.oddsPhase.isNotEmpty) {
+    final price = prediction.hasApprovedPredictionPrice
+        ? marketPrice(prediction.effectiveOdds)
+        : '';
+    if (price.isEmpty) return null;
+    return HomeOddsOption(
+      prediction.prediction,
+      prediction.prediction,
+      price,
+      exactMarket,
+      sportyMarketId: prediction.sportyMarketId,
+      sportyOutcomeId: prediction.sportyOutcomeId,
+      sportySpecifier: prediction.sportySpecifier,
+    );
+  }
   final options = homeMarketOdds(
     fixture.withPrediction(prediction),
     exactMarket,
@@ -1238,7 +1255,8 @@ HomeOddsOption? homePredictionOption(
     }
   }
   final supplied = marketPrice(prediction.predictionOdds);
-  if (supplied.isNotEmpty &&
+  if (prediction.hasApprovedPredictionPrice &&
+      supplied.isNotEmpty &&
       prediction.sportyMarketId.isNotEmpty &&
       prediction.sportyOutcomeId.isNotEmpty) {
     return HomeOddsOption(
@@ -1259,27 +1277,20 @@ String homePredictionOdds(
   PredictionModel prediction,
   String sport,
 ) {
-  if (sport.toLowerCase() == 'football' && prediction.provider.isNotEmpty) {
-    if (prediction.oddsSource.isNotEmpty) {
-      return prediction.hasApprovedPredictionPrice
-          ? marketPrice(prediction.effectiveOdds)
-          : '';
-    }
-    final option = homePredictionOption(fixture, prediction, sport);
-    if (option != null &&
-        option.sportyMarketId.isNotEmpty &&
-        option.sportyOutcomeId.isNotEmpty &&
-        option.odd.isNotEmpty) {
-      return option.odd;
-    }
-    // Generic fixture markets may contain historical model-provider prices.
-    // For a prediction, use only the response's approved selected price.
+  if (!fixture.hasPrematchMarketSnapshot && prediction.oddsPhase != 'prematch')
+    return '';
+  if (prediction.oddsSource.isNotEmpty || prediction.oddsPhase.isNotEmpty) {
     return prediction.hasApprovedPredictionPrice
         ? marketPrice(prediction.effectiveOdds)
         : '';
   }
-  final price = homePredictionOption(fixture, prediction, sport)?.odd ?? '';
-  return price.isNotEmpty ? price : fixture.oddsForPrediction(prediction);
+  final option = homePredictionOption(fixture, prediction, sport);
+  if (option != null &&
+      option.sportyMarketId.isNotEmpty &&
+      option.sportyOutcomeId.isNotEmpty)
+    return option.odd;
+  if (prediction.provider.isNotEmpty) return '';
+  return option?.odd ?? fixture.oddsForPrediction(prediction);
 }
 
 class HomeProbabilityReview {

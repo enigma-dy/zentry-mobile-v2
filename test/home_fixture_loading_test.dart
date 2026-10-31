@@ -37,6 +37,9 @@ Map<String, dynamic> fixtureJson(String id, String home, String away) => {
   'normalized_home': home.toLowerCase(),
   'normalized_away': away.toLowerCase(),
   'match_time': '2026-10-16T18:00:00Z',
+  'provider_mappings': [
+    {'provider': 'sporty', 'last_synced_at': '2026-10-16T17:00:00Z'},
+  ],
   'status': 'prematch',
   'home_score': 0,
   'away_score': 0,

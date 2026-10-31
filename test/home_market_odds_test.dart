@@ -3,12 +3,20 @@ import 'package:predict/src/models/fixture_model.dart';
 import 'package:predict/src/models/home_fixture_groups.dart';
 import 'package:predict/src/models/home_markets.dart';
 
+FixtureModel prematchFixture(Map<String, dynamic> json) =>
+    FixtureModel.fromJson({'match_time': '2099-01-01T15:00:00Z', ...json});
+const prematchPrice = <String, dynamic>{
+  'odds_phase': 'prematch',
+  'odds_observed_at': '2026-10-31T14:00:00Z',
+  'match_time': '2026-10-31T15:00:00Z',
+};
+
 FixtureModel fixture(
   String league, {
   String country = '',
   String? pick,
   Map<String, dynamic>? markets,
-}) => FixtureModel.fromJson({
+}) => prematchFixture({
   'id': '$country-$league',
   'league_name': league,
   'country': country,
@@ -21,6 +29,78 @@ FixtureModel fixture(
 
 void main() {
   test(
+    'Esbjerg live fixture odds never replace a prematch prediction price',
+    () {
+      final match = FixtureModel.fromJson({
+        'id': 'esbjerg-hvidovre',
+        'sport_id': 1,
+        'home_team': 'Esbjerg FB',
+        'away_team': 'Hvidovre IF',
+        'status': 'live',
+        'match_time': '2026-10-31T15:00:00Z',
+        'provider_mappings': [
+          {'provider': 'sporty', 'last_synced_at': '2026-10-31T16:26:40Z'},
+        ],
+        'markets': {
+          'over_under': {'line': '1.5', 'over': '1.92'},
+          'sporty': [
+            {
+              'id': '18',
+              'specifier': 'total=1.5',
+              'outcomes': [
+                {'id': '12', 'name': 'Over 1.5', 'odds': '1.92'},
+              ],
+            },
+          ],
+        },
+      });
+      for (final provider in ['betmines', 'talkfootball']) {
+        final raw = <String, dynamic>{
+          'id': 'p',
+          'provider': provider,
+          'prediction': 'O15',
+          'prediction_odds': '1.92',
+          'match_time': '2026-10-31T15:00:00Z',
+        };
+        final unknown = PredictionModel.fromJson(raw);
+        expect(homePredictionOdds(match, unknown, 'football'), isEmpty);
+        expect(homePredictionOption(match, unknown, 'football'), isNull);
+        expect(match.oddsForPrediction(unknown), isEmpty);
+        expect(
+          homeMarketOdds(
+            match,
+            'Over/Under 1.5',
+            'football',
+          ).every((o) => o.odd.isEmpty),
+          isTrue,
+        );
+        final saved = PredictionModel.fromJson({
+          ...raw,
+          ...prematchPrice,
+          'odds_source': 'betmines',
+          'prediction_odds': '1.22',
+        });
+        expect(homePredictionOdds(match, saved, 'football'), '1.22');
+        expect(homePredictionOption(match, saved, 'football')!.odd, '1.22');
+        final roundTrip = PredictionModel.fromJson(saved.toJson());
+        expect(
+          homePredictionOdds(
+            FixtureModel.fromJson(match.toJson()),
+            roundTrip,
+            'football',
+          ),
+          '1.22',
+        );
+        final late = PredictionModel.fromJson({
+          ...saved.toJson(),
+          'odds_observed_at': '2026-10-31T15:00:00Z',
+        });
+        expect(homePredictionOdds(match, late, 'football'), isEmpty);
+      }
+    },
+  );
+
+  test(
     'Popular threshold uses preferences while local Betmines supplies the quote',
     () {
       final item = <String, dynamic>{
@@ -28,7 +108,10 @@ void main() {
         'votes_percent': 95,
         'probability': 38,
         'confidence': 38,
-        'extra': {'probability_source': 'betmines', 'probability_kind': 'model'},
+        'extra': {
+          'probability_source': 'betmines',
+          'probability_kind': 'model',
+        },
         'probability_review': {'reason': 'model_market_disagreement'},
       };
       expect(predictionConfidenceLabel(item), '38%');
@@ -50,6 +133,8 @@ void main() {
         'id': 'sandviken',
         'sport_id': 1,
         'source': 'talkfootball',
+        'odds_source': 'sporty',
+        ...prematchPrice,
         'selection': 'Over 1.5',
         'probability': 65,
         'confidence': 65,
@@ -74,7 +159,7 @@ void main() {
   test(
     'Sandviken Bjarg O15 1.08 and model 65 triggers review without rewriting either',
     () {
-      final match = FixtureModel.fromJson({
+      final match = prematchFixture({
         'id': 'sandviken-bjarg',
         'sport_id': 1,
         'status': 'prematch',
@@ -111,7 +196,7 @@ void main() {
       expect(review.gap, greaterThan(25));
       expect(homePredictionOdds(match, match.prediction!, 'football'), '1.08');
       expect(match.prediction!.probability, 65);
-      final live = FixtureModel.fromJson({...match.toJson(), 'status': 'live'});
+      final live = prematchFixture({...match.toJson(), 'status': 'live'});
       expect(
         homePredictionProbabilityReview(live, live.prediction!, 'football'),
         isNull,
@@ -130,7 +215,7 @@ void main() {
   );
 
   test('prediction probability uses its exact source selection breakdown', () {
-    final match = FixtureModel.fromJson({
+    final match = prematchFixture({
       'sport_id': 1,
       'prediction': {
         'id': 'stale-tip',
@@ -151,7 +236,7 @@ void main() {
   test(
     'all outcome probabilities survive prediction metadata and JSON copies',
     () {
-      final match = FixtureModel.fromJson({
+      final match = prematchFixture({
         'id': 'full-probabilities',
         'sport_id': 1,
         'prediction': {
@@ -165,7 +250,7 @@ void main() {
       });
       for (final fixture in [
         match,
-        FixtureModel.fromJson(match.toJson()),
+        prematchFixture(match.toJson()),
         match.withPrediction(match.prediction!),
         filterHomeFixtures([match], '1X2', 'football').single,
       ]) {
@@ -177,7 +262,7 @@ void main() {
         expect(homeOutcomeProbability(fixture, 'Over/Under 1.5', 'U15'), 14);
         expect(homeOutcomeProbability(fixture, 'Over/Under 2.5', 'U25'), 35);
       }
-      final nested = FixtureModel.fromJson({
+      final nested = prematchFixture({
         'prediction': {
           'id': 'nested',
           'prediction': '1',
@@ -193,7 +278,7 @@ void main() {
   );
 
   test('half-goal totals complete the missing side without guessing 1X2', () {
-    final match = FixtureModel.fromJson({
+    final match = prematchFixture({
       'prediction': {'id': 'o15', 'prediction': 'O15', 'probability': 86},
       'probability': {
         'over25': 100,
@@ -239,7 +324,7 @@ void main() {
       total('18', 'Over/Under', '2.5', '1.31'),
     ];
     for (final hasFullMatch in [false, true]) {
-      final match = FixtureModel.fromJson({
+      final match = prematchFixture({
         'id': 'riga-mariners-alberts',
         'sport_id': 1,
         'home_team': 'Riga Mariners',
@@ -276,7 +361,7 @@ void main() {
       expect(option?.sportyMarketId ?? '', hasFullMatch ? '18' : '');
       expect(option?.sportySpecifier ?? '', hasFullMatch ? 'total=1.5' : '');
     }
-    final onlyScoped = FixtureModel.fromJson({
+    final onlyScoped = prematchFixture({
       'markets': {'sporty': wrongMarkets.take(4).toList()},
     });
     expect(homeMarketLines(onlyScoped, 'Over/Under'), isEmpty);
@@ -285,7 +370,7 @@ void main() {
   test(
     'synced alternate totals use their own line even when labels are missing',
     () {
-      final match = FixtureModel.fromJson({
+      final match = prematchFixture({
         'id': 'synced-total',
         'sport_id': 1,
         'home_team': 'Home',
@@ -350,14 +435,17 @@ void main() {
       final btts = filterHomeFixtures([match], 'GG/NG', 'football').single;
       expect(btts.prediction!.probability, 71);
       expect(homeOutcomeProbability(btts, '1X2', 'X'), 25);
-      expect(match.prediction!.effectiveOdds, '1.32');
+      expect(
+        match.prediction!.effectiveOdds,
+        isEmpty,
+      ); // Undated source price is not verified.
     },
   );
 
   test(
     'available provider odds are selected per outcome and survive JSON copies',
     () {
-      final match = FixtureModel.fromJson({
+      final match = prematchFixture({
         ...fixture('League').toJson(),
         'markets': {
           '1x2': {'home': '2.10', 'draw': '0', 'away': ''},
@@ -368,8 +456,10 @@ void main() {
           {
             'id': 'betmines',
             'provider': 'betmines',
+            'odds_source': 'betmines',
+            ...prematchPrice,
             'prediction': 'GG',
-            'prediction_odds': '1.85',
+            'prediction_odds': '1.80',
             'odd_1': '2.40',
             'odd_x': '3.20',
             'odd_2': '4.0',
@@ -383,7 +473,7 @@ void main() {
       });
       for (final value in [
         match,
-        FixtureModel.fromJson(match.toJson()),
+        prematchFixture(match.toJson()),
         match.withPrediction(match.prediction!),
       ]) {
         expect(value.displayOdds, ['2.10', '3.20', '4.0']);
@@ -408,7 +498,7 @@ void main() {
     },
   );
   test('a prediction price only fills its exact selection and line', () {
-    final match = FixtureModel.fromJson({
+    final match = prematchFixture({
       ...fixture('League').toJson(),
       'predictions': [
         {'id': 'p', 'prediction': 'Over 1.5', 'prediction_odds': '1.24'},
@@ -426,7 +516,7 @@ void main() {
   });
 
   test('Betmines probability maps feed non-primary market filters', () {
-    final match = FixtureModel.fromJson({
+    final match = prematchFixture({
       ...fixture('Probability League', pick: 'U35').toJson(),
       'probability': {
         'home': 50,
@@ -458,7 +548,7 @@ void main() {
   });
 
   test('filtered probability picks retain exact SportyBet outcomes', () {
-    final match = FixtureModel.fromJson({
+    final match = prematchFixture({
       ...fixture('Exact Market', pick: 'U35').toJson(),
       'probability': {'over85Corner': 71, 'under85Corner': 29},
       'markets': {
@@ -495,7 +585,7 @@ void main() {
   test(
     'league priority from the API survives pagination and market filtering',
     () {
-      final prioritized = FixtureModel.fromJson({
+      final prioritized = prematchFixture({
         ...fixture(
           'Zulu',
           markets: {
@@ -511,7 +601,7 @@ void main() {
       );
       expect(groupHomeFixturesByLeague(filtered).keys.first, 'Zulu');
       expect(
-        FixtureModel.fromJson(prioritized.toJson()).leagueHasPredictions,
+        prematchFixture(prioritized.toJson()).leagueHasPredictions,
         isTrue,
       );
     },
@@ -520,7 +610,7 @@ void main() {
   test(
     'market filtering keeps odds supplied by a different prediction market',
     () {
-      final match = FixtureModel.fromJson({
+      final match = prematchFixture({
         ...fixture('League').toJson(),
         'predictions': [
           {
@@ -594,7 +684,7 @@ void main() {
     expect(markets.oddsFor('Over 8.5 Corners'), isEmpty);
   });
   test('missing or invalid odds never generate a price', () {
-    final match = FixtureModel.fromJson({
+    final match = prematchFixture({
       ...fixture('League').toJson(),
       'prediction': {'id': 'no-odds', 'prediction': '1X'},
     });
@@ -649,7 +739,7 @@ void main() {
         'prediction_odds': '2.35',
         'probability': 86,
       });
-      final match = FixtureModel.fromJson({
+      final match = prematchFixture({
         'id': 'brisbane',
         'sport_id': 1,
         'markets': {
@@ -664,6 +754,7 @@ void main() {
         ...prediction.toJson(),
         'prediction_odds': '1.23',
         'odds_source': 'betmines',
+        ...prematchPrice,
       });
       expect(homePredictionOdds(match, fallback, 'football'), '1.23');
       expect(
@@ -681,13 +772,14 @@ void main() {
       'prediction_odds': '1.43',
       'odd_1': '2.35',
       'odds_source': 'sporty',
+      ...prematchPrice,
     });
     expect(p.effectiveOdds, '1.43');
   });
   test(
     'approved Betmines prediction price wins over a later fixture snapshot',
     () {
-      final match = FixtureModel.fromJson({
+      final match = prematchFixture({
         'id': 'brisbane',
         'sport_id': 1,
         'markets': {
@@ -709,6 +801,7 @@ void main() {
         'probability': 86,
         'prediction_odds': '1.12',
         'odds_source': 'betmines',
+        ...prematchPrice,
       });
       expect(homePredictionOdds(match, p, 'football'), '1.12');
       final unavailable = PredictionModel.fromJson({

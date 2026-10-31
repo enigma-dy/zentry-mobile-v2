@@ -26,6 +26,9 @@ Map<String, dynamic> matchJson(
   'home_team': '$id Home',
   'away_team': '$id Away',
   'match_time': '2026-10-05T16:00:00Z',
+  'provider_mappings': [
+    {'provider': 'sporty', 'last_synced_at': '2026-10-05T15:00:00Z'},
+  ],
   'status': 'finished',
   'markets':
       markets ??
@@ -72,6 +75,9 @@ void main() {
           'provider': 'talkfootball',
           'prediction_odds': '1.08',
           'odds_source': 'sporty',
+          'odds_phase': 'prematch',
+          'odds_observed_at': '2026-10-05T15:00:00Z',
+          'match_time': '2026-10-05T16:00:00Z',
           'prediction': 'O15',
           'probability': 65,
         },

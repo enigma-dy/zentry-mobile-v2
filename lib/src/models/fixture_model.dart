@@ -108,12 +108,14 @@ class ProviderMappingModel {
   final String provider;
   final String sourceFixtureId;
   final String sourceLeagueId;
+  final DateTime? lastSyncedAt;
   const ProviderMappingModel({
     this.id = '',
     this.fixtureId = '',
     this.provider = '',
     this.sourceFixtureId = '',
     this.sourceLeagueId = '',
+    this.lastSyncedAt,
   });
   factory ProviderMappingModel.fromJson(Map<String, dynamic> json) =>
       ProviderMappingModel(
@@ -122,6 +124,7 @@ class ProviderMappingModel {
         provider: _string(json['provider']),
         sourceFixtureId: _string(json['source_fixture_id']),
         sourceLeagueId: _string(json['source_league_id']),
+        lastSyncedAt: DateTime.tryParse(_string(json['last_synced_at'])),
       );
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -129,6 +132,7 @@ class ProviderMappingModel {
     'provider': provider,
     'source_fixture_id': sourceFixtureId,
     'source_league_id': sourceLeagueId,
+    if (lastSyncedAt != null) 'last_synced_at': lastSyncedAt!.toIso8601String(),
   };
 }
 
@@ -255,6 +259,8 @@ class PredictionModel {
   final String prediction;
   final String predictionOdds;
   final String oddsSource;
+  final String oddsPhase;
+  final DateTime? oddsObservedAt;
   final int probability;
   final String status;
   final int? suggestionResult;
@@ -283,6 +289,8 @@ class PredictionModel {
     required this.prediction,
     this.predictionOdds = '',
     this.oddsSource = '',
+    this.oddsPhase = '',
+    this.oddsObservedAt,
     this.probability = 0,
     this.status = 'pending',
     this.suggestionResult,
@@ -299,14 +307,16 @@ class PredictionModel {
   bool get isLost => status.toLowerCase() == 'lost' || suggestionResult == 2;
   bool get isPending => !isWon && !isLost;
   String get selection => prediction;
-  bool get hasApprovedPredictionPrice =>
-      sportId != 1 ||
-      provider.isEmpty ||
-      provider == 'betmines' ||
-      provider == 'sporty' ||
-      oddsSource == 'betmines' ||
-      oddsSource == 'sporty' ||
-      (sportyMarketId.isNotEmpty && sportyOutcomeId.isNotEmpty);
+  bool get hasApprovedPredictionPrice {
+    if (oddsPhase == 'unavailable' || oddsSource == 'unavailable') return false;
+    if (provider.isEmpty && oddsSource.isEmpty && oddsPhase.isEmpty)
+      return true;
+    return oddsPhase == 'prematch' &&
+        oddsObservedAt != null &&
+        matchTime != null &&
+        oddsObservedAt!.isBefore(matchTime!) &&
+        (oddsSource == 'sporty' || oddsSource == 'betmines');
+  }
 
   String get effectiveOdds {
     if (!hasApprovedPredictionPrice) return '';
@@ -358,6 +368,8 @@ class PredictionModel {
     ),
     bookmakers: _map(json['bookmakers']),
     oddsSource: _string(json['odds_source']),
+    oddsPhase: _string(json['odds_phase']),
+    oddsObservedAt: DateTime.tryParse(_string(json['odds_observed_at'])),
     id: _string(json['id']),
     fixtureId: json['fixture_id'] == null ? null : _string(json['fixture_id']),
     sportId: _int(json['sport_id']) == 0 ? 1 : _int(json['sport_id']),
@@ -425,6 +437,9 @@ class PredictionModel {
     'prediction': prediction,
     'prediction_odds': predictionOdds,
     'odds_source': oddsSource,
+    'odds_phase': oddsPhase,
+    if (oddsObservedAt != null)
+      'odds_observed_at': oddsObservedAt!.toIso8601String(),
     'probability': probability,
     'status': status,
     if (suggestionResult != null) 'suggestion_result': suggestionResult,
@@ -495,10 +510,32 @@ class FixtureModel {
     this.updatedAt,
   });
 
+  bool get hasPrematchMarketSnapshot {
+    final sporty = providerMappings
+        .where((m) => m.provider == 'sporty')
+        .toList();
+    if (sporty.isNotEmpty) {
+      return sporty.every(
+        (m) => m.lastSyncedAt != null && m.lastSyncedAt!.isBefore(matchTime),
+      );
+    }
+    return DateTime.now().isBefore(matchTime) &&
+        !const {
+          'live',
+          'finished',
+          'ft',
+          'inplay',
+        }.contains(status.toLowerCase());
+  }
+
   FixtureMarketsModel get effectiveMarkets {
-    var prices = markets?.toJson() ?? <String, dynamic>{};
+    var prices = hasPrematchMarketSnapshot
+        ? (markets?.toJson() ?? <String, dynamic>{})
+        : <String, dynamic>{};
     for (final p in [?prediction, ...predictions]) {
-      if (!p.hasApprovedPredictionPrice) continue;
+      if (!p.hasApprovedPredictionPrice ||
+          (!hasPrematchMarketSnapshot && p.oddsPhase != 'prematch'))
+        continue;
       final pick = p.prediction.toUpperCase().trim();
       final odd = p.effectiveOdds;
       prices = _mergeMarketPrices(prices, {
@@ -562,6 +599,9 @@ class FixtureModel {
   }
 
   String oddsForPrediction(PredictionModel value) {
+    if (value.provider.isNotEmpty || value.oddsSource.isNotEmpty) {
+      return _validOdds(value.effectiveOdds);
+    }
     final market = oddsForSelection(value.prediction);
     return market.isNotEmpty ? market : _validOdds(value.effectiveOdds);
   }
