@@ -1011,6 +1011,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _hasMoreFixtures = _currentPage < totalPages && prematch.isNotEmpty;
           if (!silent) _isLoadingSportsData = false;
         });
+        unawaited(_refreshHomeMarketOdds(prematch));
       }
 
       // Secondary futures resolve asynchronously without blocking fixture display
@@ -1145,7 +1146,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ? defaultHomeMarket(sport)
             : _selectedMarket);
 
-    // Only hydrate fixtures that have NO market odds or prediction odds
+    // Missing selected-market odds need repair even without a prediction.
     final needHydration = <int>[];
     for (var i = 0; i < result.length; i++) {
       final fixture = result[i];
@@ -1157,7 +1158,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final hasPrediction =
           fixture.prediction == null ||
           homePredictionOdds(fixture, fixture.prediction!, sport).isNotEmpty;
-      if (!hasMarket && !hasPrediction) {
+      if (!hasMarket || !hasPrediction) {
         needHydration.add(i);
       }
     }
@@ -1172,7 +1173,11 @@ class _HomeScreenState extends State<HomeScreen> {
         fixture.id,
         () => _getHomeFixtureMarkets(fixture.id),
       );
-      if (markets != null) result[i] = fixture.withMarkets(markets);
+      if (markets != null) {
+        result[i] = fixture.withMarkets(markets);
+      } else {
+        _homeMarketDetails.remove(fixture.id);
+      }
     }
     return result;
   }
@@ -5788,6 +5793,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final explicit = RegExp(r' ([+-]?\d+(?:\.\d+)?)$').firstMatch(market);
     final requested = double.tryParse(explicit?.group(1) ?? '');
     if (requested != null && lines.contains(requested)) return requested;
+    if (baseHomeMarket(market) == 'Over/Under' && lines.contains(1.5))
+      return 1.5;
     if (lines.contains(2.5)) return 2.5;
     return lines.first;
   }
@@ -5873,7 +5880,11 @@ class _HomeScreenState extends State<HomeScreen> {
               color: const Color(0xFF231B32),
               onSelected: (value) {
                 final availableLines = homeMarketLineChoices(fixtures, value);
-                final nextLine = availableLines.contains(2.5)
+                final nextLine =
+                    baseHomeMarket(value) == 'Over/Under' &&
+                        availableLines.contains(1.5)
+                    ? 1.5
+                    : availableLines.contains(2.5)
                     ? 2.5
                     : availableLines.isEmpty
                     ? null

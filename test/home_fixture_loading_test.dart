@@ -59,6 +59,88 @@ http.Response fixturePage(int page, List<Map<String, dynamic>> fixtures) =>
     );
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  for (final (listHasOdds, sourcesSynced) in const [
+    (false, false),
+    (true, false),
+    (false, true),
+    (true, true),
+  ]) {
+    testWidgets(
+      'Bursaspor displays 1X2 without a prediction (list odds: $listHasOdds, sources synced: $sourcesSynced)',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 1600);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final bursaspor = {
+          ...fixtureJson('bursaspor', 'Bursaspor', 'Bandirmaspor'),
+          'league_name': '1. Lig',
+          'country': 'Turkiye',
+          'sportybet_available': true,
+          'sportybet_synced': sourcesSynced,
+          'sporty_event_id': 'sr:match:72735872',
+          'predictions': null,
+        };
+        final markets = {
+          '1x2': {'home': '1.45', 'draw': '4.50', 'away': '6.30'},
+          'sporty': [
+            {
+              'id': '1',
+              'name': '1X2',
+              'outcomes': [
+                {'id': '1', 'name': 'Home', 'odds': '1.45'},
+                {'id': '2', 'name': 'Draw', 'odds': '4.50'},
+                {'id': '3', 'name': 'Away', 'odds': '6.30'},
+              ],
+            },
+          ],
+        };
+        var detailRequests = 0;
+        final service = SportsService(
+          client: MockClient((request) async {
+            if (request.url.path == '/api/v1/fixtures') {
+              return fixturePage(1, [
+                {...bursaspor, if (listHasOdds) 'markets': markets},
+              ]);
+            }
+            if (request.url.path == '/api/v1/fixtures/bursaspor') {
+              detailRequests++;
+              return http.Response(
+                jsonEncode({
+                  'success': true,
+                  'data': {
+                    'fixture': {...bursaspor, 'markets': markets},
+                  },
+                }),
+                200,
+              );
+            }
+            return auxiliaryResponse(request);
+          }),
+        );
+        await tester.pumpWidget(
+          MaterialApp(home: HomeScreen(sportsService: service)),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('1.45'), findsWidgets);
+        expect(find.text('4.50'), findsWidgets);
+        expect(find.text('6.30'), findsWidgets);
+        expect(find.text('SPORTY LINKED'), findsNothing);
+        expect(
+          find.text('SYNCED'),
+          sourcesSynced ? findsOneWidget : findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('home-prediction-bursaspor')),
+          findsNothing,
+        );
+        expect(detailRequests, listHasOdds ? 0 : 1);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
   test(
     'captured API response parses fixtures with empty countries and partial markets',
     () async {

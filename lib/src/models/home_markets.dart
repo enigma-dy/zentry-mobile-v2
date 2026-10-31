@@ -88,15 +88,52 @@ double? predictionTotalLine(String selection) {
 }
 
 double? _probabilityValue(dynamic value) {
-  final number = value is num ? value.toDouble() : double.tryParse('$value');
-  if (number == null || !number.isFinite || number <= 0 || number > 100) {
+  final number = value is num
+      ? value.toDouble()
+      : double.tryParse('$value'.replaceAll('%', '').trim());
+  if (number == null || !number.isFinite || number < 0 || number > 100) {
     return null;
   }
   return number;
 }
 
-String _probabilityKey(String value) =>
-    value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+String _probabilityKey(String value) {
+  final key = value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  final compact = RegExp(r'^([ou])(\d+)$').firstMatch(key);
+  if (compact != null) {
+    return '${compact[1] == 'o' ? 'over' : 'under'}${compact[2]}';
+  }
+  return key;
+}
+
+Map<String, dynamic> _fixtureProbabilityValues(FixtureModel fixture) {
+  final result = <String, dynamic>{};
+  final names = <String, String>{};
+  final predictions =
+      [
+        ?fixture.prediction,
+        ...fixture.predictions,
+      ].where((prediction) => prediction.provider != 'scores24').toList()..sort(
+        (a, b) => (a.provider == 'betmines' ? 1 : 0).compareTo(
+          b.provider == 'betmines' ? 1 : 0,
+        ),
+      );
+  for (final values in [
+    ...predictions.map((prediction) => prediction.marketProbabilities),
+    fixture.marketProbabilities,
+  ]) {
+    for (final entry in values.entries) {
+      if (_probabilityValue(entry.value) != null) {
+        final key = _probabilityKey(entry.key);
+        final previous = names[key];
+        if (previous != null) result.remove(previous);
+        names[key] = entry.key;
+        result[entry.key] = entry.value;
+      }
+    }
+  }
+  return result;
+}
 
 double? _probabilityFor(Map<String, dynamic> values, List<String> keys) {
   final normalized = {
@@ -111,7 +148,7 @@ double? _probabilityFor(Map<String, dynamic> values, List<String> keys) {
 }
 
 Map<String, int> homeOneXTwoProbabilities(FixtureModel fixture) {
-  final values = fixture.marketProbabilities;
+  final values = _fixtureProbabilityValues(fixture);
   if (values.isEmpty) return const {};
   final result = <String, int>{};
   final home = _probabilityFor(values, const ['home', 'home_win', '1']);
@@ -123,14 +160,14 @@ Map<String, int> homeOneXTwoProbabilities(FixtureModel fixture) {
   return result;
 }
 
-int? homeOutcomeProbability(
+int? _suppliedHomeOutcomeProbability(
   FixtureModel fixture,
   String market,
   String selection,
 ) {
   final base = baseHomeMarket(market);
   final pick = _probabilityKey(selection);
-  final values = fixture.marketProbabilities;
+  final values = _fixtureProbabilityValues(fixture);
   double? probability;
   if (base == '1X2' || base == 'Match Winner') {
     probability = switch (pick) {
@@ -142,18 +179,21 @@ int? homeOutcomeProbability(
   } else if (base == 'Double Chance') {
     final result = homeOneXTwoProbabilities(fixture);
     probability = switch (pick) {
-      '1x' => _probabilityFor(values, const ['1x', 'home_draw']) ??
-          (result.containsKey('1') && result.containsKey('X')
-              ? (result['1']! + result['X']!).clamp(0, 100).toDouble()
-              : null),
-      '12' => _probabilityFor(values, const ['12', 'home_away']) ??
-          (result.containsKey('1') && result.containsKey('2')
-              ? (result['1']! + result['2']!).clamp(0, 100).toDouble()
-              : null),
-      'x2' => _probabilityFor(values, const ['x2', 'draw_away']) ??
-          (result.containsKey('X') && result.containsKey('2')
-              ? (result['X']! + result['2']!).clamp(0, 100).toDouble()
-              : null),
+      '1x' =>
+        _probabilityFor(values, const ['1x', 'home_draw']) ??
+            (result.containsKey('1') && result.containsKey('X')
+                ? (result['1']! + result['X']!).clamp(0, 100).toDouble()
+                : null),
+      '12' =>
+        _probabilityFor(values, const ['12', 'home_away']) ??
+            (result.containsKey('1') && result.containsKey('2')
+                ? (result['1']! + result['2']!).clamp(0, 100).toDouble()
+                : null),
+      'x2' =>
+        _probabilityFor(values, const ['x2', 'draw_away']) ??
+            (result.containsKey('X') && result.containsKey('2')
+                ? (result['X']! + result['2']!).clamp(0, 100).toDouble()
+                : null),
       _ => null,
     };
   } else if (base == 'GG/NG') {
@@ -164,10 +204,14 @@ int? homeOutcomeProbability(
         : null;
   } else {
     final marketLine = RegExp(r' ([+-]?\d+(?:\.\d+)?)$').firstMatch(market);
-    final expectedLine = predictionTotalLine(selection) ??
+    final expectedLine =
+        predictionTotalLine(selection) ??
         double.tryParse(marketLine?.group(1) ?? '');
-    final expectedDirection = pick.startsWith('o') ? 'over' :
-        pick.startsWith('u') ? 'under' : '';
+    final expectedDirection = pick.startsWith('o')
+        ? 'over'
+        : pick.startsWith('u')
+        ? 'under'
+        : '';
     final token = switch (base) {
       'Corners' => 'corner',
       'Cards' => 'card',
@@ -180,12 +224,19 @@ int? homeOutcomeProbability(
         probability = _probabilityValue(entry.value);
         break;
       }
-      if (expectedLine == null || expectedDirection.isEmpty ||
+      if (expectedLine == null ||
+          expectedDirection.isEmpty ||
           !key.contains(expectedDirection) ||
-          _marketLineFromProbabilityKey(entry.key) != expectedLine) continue;
+          _marketLineFromProbabilityKey(entry.key) != expectedLine) {
+        continue;
+      }
       if (token.isNotEmpty && !key.contains(token)) continue;
-      if (token.isEmpty && (key.contains('corner') ||
-          key.contains('card') || key.contains('set'))) continue;
+      if (token.isEmpty &&
+          (key.contains('corner') ||
+              key.contains('card') ||
+              key.contains('set'))) {
+        continue;
+      }
       probability = _probabilityValue(entry.value);
       break;
     }
@@ -204,6 +255,33 @@ int? homeOutcomeProbability(
     }
   }
   return probability?.round();
+}
+
+int? homeOutcomeProbability(
+  FixtureModel fixture,
+  String market,
+  String selection,
+) {
+  final supplied = _suppliedHomeOutcomeProbability(fixture, market, selection);
+  if (supplied != null) return supplied;
+  final line =
+      predictionTotalLine(selection) ??
+      double.tryParse(
+        RegExp(r' ([+-]?\d+(?:\.\d+)?)$').firstMatch(market)?.group(1) ?? '',
+      );
+  // Half-goal full-match totals have exactly two exhaustive outcomes.
+  // Integer/quarter lines can push or split and cannot use this complement.
+  if (baseHomeMarket(market) == 'Over/Under' &&
+      line != null &&
+      (line - line.floor()) == 0.5) {
+    final pick = _probabilityKey(selection);
+    if (pick.startsWith('over') || pick.startsWith('under')) {
+      final opposite = '${pick.startsWith('over') ? 'Under' : 'Over'} $line';
+      final other = _suppliedHomeOutcomeProbability(fixture, market, opposite);
+      if (other != null) return 100 - other;
+    }
+  }
+  return null;
 }
 
 int zaiPredictionConfidence(Map<String, dynamic> item) {
@@ -232,7 +310,7 @@ double? _marketLineFromProbabilityKey(String key) {
   final number = double.tryParse(digits);
   if (number == null) return null;
   // Betmines uses compact total keys such as over85Corner/under105Corner.
-  return number >= 15 ? number / 10 : number;
+  return number >= 15 || digits.startsWith('0') ? number / 10 : number;
 }
 
 class HomeMarketProbabilityItem {
@@ -303,13 +381,24 @@ PredictionModel? homeMarketProbabilityPrediction(
   String market,
   String sport,
 ) {
-  final values = fixture.marketProbabilities;
+  final values = _fixtureProbabilityValues(fixture);
   if (values.isEmpty) return null;
   final base = baseHomeMarket(market);
   final source =
       fixture.prediction ??
       (fixture.predictions.isEmpty ? null : fixture.predictions.first);
-  if (source == null) return null;
+  final probabilitySource =
+      source ??
+      PredictionModel(
+        id: 'model-${fixture.id}',
+        fixtureId: fixture.id,
+        sportId: fixture.sportId,
+        prediction: '',
+        homeTeam: fixture.homeTeam,
+        awayTeam: fixture.awayTeam,
+        leagueName: fixture.leagueName,
+        matchTime: fixture.matchTime,
+      );
 
   String selection = '';
   double probability = 0;
@@ -460,26 +549,26 @@ PredictionModel? homeMarketProbabilityPrediction(
 
   if (selection.isEmpty || probability <= 0) return null;
   return PredictionModel(
-    id: source.id,
-    fixtureId: source.fixtureId ?? fixture.id,
-    sportId: source.sportId,
-    sportyEventId: source.sportyEventId,
-    sportyMarketId: source.sportyMarketId,
-    sportyOutcomeId: source.sportyOutcomeId,
-    sportySpecifier: source.sportySpecifier,
-    provider: source.provider,
+    marketProbabilities: _fixtureProbabilityValues(fixture),
+    id: probabilitySource.id,
+    fixtureId: probabilitySource.fixtureId ?? fixture.id,
+    sportId: probabilitySource.sportId,
+    sportyEventId: probabilitySource.sportyEventId,
+    // A derived selection must resolve its own bookmaker identifiers.
+    // The source prediction may describe a different market or total line.
+    provider: probabilitySource.provider,
     prediction: selection,
     probability: probability.round(),
-    status: source.status,
-    suggestionResult: source.suggestionResult,
-    odd1: source.odd1,
-    oddX: source.oddX,
-    odd2: source.odd2,
-    marketOdds: source.marketOdds,
-    homeTeam: source.homeTeam,
-    awayTeam: source.awayTeam,
-    leagueName: source.leagueName,
-    matchTime: source.matchTime,
+    status: probabilitySource.status,
+    suggestionResult: probabilitySource.suggestionResult,
+    odd1: probabilitySource.odd1,
+    oddX: probabilitySource.oddX,
+    odd2: probabilitySource.odd2,
+    marketOdds: probabilitySource.marketOdds,
+    homeTeam: probabilitySource.homeTeam,
+    awayTeam: probabilitySource.awayTeam,
+    leagueName: probabilitySource.leagueName,
+    matchTime: probabilitySource.matchTime,
   );
 }
 
@@ -542,7 +631,25 @@ List<HomeOddsOption> _sportyMarketOptions(
     if (value is! Map) continue;
     final market = Map<String, dynamic>.from(value);
     final name = market['name']?.toString().trim() ?? '';
-    if (!matches(name) || market['outcomes'] is! List) continue;
+    final id = market['id']?.toString() ?? '';
+    final exactIds = switch (base) {
+      '1X2' => const {'1'},
+      'Match Winner' => const {'219', '186', '251', '406'},
+      'Double Chance' => const {'10'},
+      'GG/NG' => const {'29'},
+      'Over/Under' => const {'18', '225', '189', '258', '238'},
+      'Corners' => const {'166'},
+      'Draw No Bet' => const {'11'},
+      _ => const <String>{},
+    };
+    // Full-match totals must use the full-match market ID. Team totals,
+    // halves and player props can all have the same name and total line.
+    if ((base == 'Over/Under'
+            ? !exactIds.contains(id)
+            : !matches(name) && !exactIds.contains(id)) ||
+        market['outcomes'] is! List) {
+      continue;
+    }
     final specifier = market['specifier']?.toString() ?? '';
     final lineMatch = RegExp(
       r'(?:total|line|hcp)=([+-]?\d+(?:\.\d+)?)',
@@ -562,7 +669,32 @@ List<HomeOddsOption> _sportyMarketOptions(
       final outcome = Map<String, dynamic>.from(rawOutcome);
       final odd = marketPrice(outcome['odds']);
       if (odd.isEmpty) continue;
-      final label = outcome['name']?.toString().trim() ?? '';
+      var label = outcome['name']?.toString().trim() ?? '';
+      final outcomeId = outcome['id']?.toString() ?? '';
+      if (base == '1X2') {
+        label = const {'1': '1', '2': 'X', '3': '2'}[outcomeId] ?? label;
+      }
+      if (base == 'Match Winner') {
+        label = const {'4': '1', '5': '2'}[outcomeId] ?? label;
+      }
+      if (base == 'Double Chance') {
+        label = const {'9': '1X', '10': '12', '11': 'X2'}[outcomeId] ?? label;
+      }
+      if (base == 'GG/NG') {
+        label = const {'74': 'GG', '76': 'NG'}[outcomeId] ?? label;
+      }
+      if (base == 'Over/Under' && marketLine != null) {
+        label = switch (outcomeId) {
+          '12' => 'Over $lineText',
+          '13' => 'Under $lineText',
+          _ => label,
+        };
+      }
+      if (label.isEmpty && marketLine != null) {
+        final side = outcome['id']?.toString();
+        if (side == '12') label = 'Over $lineText';
+        if (side == '13') label = 'Under $lineText';
+      }
       if (label.isEmpty) continue;
       options.add(
         HomeOddsOption(
@@ -606,9 +738,16 @@ List<String> _rawKeys(String market) => switch (market) {
 List<double> homeMarketLines(FixtureModel fixture, String market) {
   final base = baseHomeMarket(market);
   if (!const {
-    'Over/Under', 'Total Sets', 'Corners', 'Cards', 'Handicap',
-    'Run Line', 'Set Handicap',
-  }.contains(base)) return const [];
+    'Over/Under',
+    'Total Sets',
+    'Corners',
+    'Cards',
+    'Handicap',
+    'Run Line',
+    'Set Handicap',
+  }.contains(base)) {
+    return const [];
+  }
   final raw = _marketMap(fixture, _rawKeys(base));
   final lines = <double>{};
   final line = double.tryParse(raw['line']?.toString() ?? '');
@@ -631,18 +770,25 @@ List<double> homeMarketLines(FixtureModel fixture, String market) {
       ...fixture.predictions,
     ]) {
       if (predictionHomeMarket(prediction.prediction, 'football') != base ||
-          prediction.effectiveOdds.isEmpty) continue;
+          prediction.effectiveOdds.isEmpty) {
+        continue;
+      }
       final line = predictionTotalLine(prediction.prediction);
       if (line != null) lines.add(line);
     }
   }
   if (const {'Over/Under', 'Total Sets', 'Corners', 'Cards'}.contains(base)) {
-    for (final key in fixture.marketProbabilities.keys) {
+    for (final key in _fixtureProbabilityValues(fixture).keys) {
       final normalized = _probabilityKey(key);
-      if (!normalized.contains('over') && !normalized.contains('under')) continue;
+      if (!normalized.contains('over') && !normalized.contains('under')) {
+        continue;
+      }
       if (base == 'Over/Under' &&
-          (normalized.contains('corner') || normalized.contains('card') ||
-              normalized.contains('set'))) continue;
+          (normalized.contains('corner') ||
+              normalized.contains('card') ||
+              normalized.contains('set'))) {
+        continue;
+      }
       if (base == 'Corners' && !normalized.contains('corner')) continue;
       if (base == 'Cards' && !normalized.contains('card')) continue;
       if (base == 'Total Sets' && !normalized.contains('set')) continue;
@@ -674,7 +820,18 @@ List<double> homeMarketLines(FixtureModel fixture, String market) {
         'Set Handicap' => name.contains('set') && name.contains('handicap'),
         _ => false,
       };
-      if (!matches) continue;
+      if (base == 'Over/Under') {
+        if (!const {
+          '18',
+          '225',
+          '189',
+          '258',
+          '238',
+        }.contains(item['id']?.toString()))
+          continue;
+      } else if (!matches) {
+        continue;
+      }
       final specifier = item['specifier']?.toString() ?? '';
       final match = RegExp(
         r'(?:total|line|hcp)=([+-]?\d+(?:\.\d+)?)',
@@ -737,6 +894,10 @@ List<HomeOddsOption> homeMarketOdds(
       ? null
       : double.parse(explicitLine[1]!);
   if (const {
+    '1X2',
+    'Match Winner',
+    'Double Chance',
+    'GG/NG',
     'Draw No Bet',
     'Handicap',
     'Run Line',
@@ -910,32 +1071,13 @@ List<FixtureModel> filterHomeFixtures(
 ) {
   if (market == 'All Markets') {
     return fixtures.map((fixture) {
-      if (fixture.predictions.isEmpty) return fixture;
-      final pred = fixture.prediction;
-      final isDummy =
-          pred != null &&
-          pred.prediction.toUpperCase().trim() == 'O15' &&
-          (pred.predictionOdds == '1.32' || pred.predictionOdds.isEmpty);
-      if (pred == null || isDummy) {
-        final nonDummy = fixture.predictions
-            .where(
-              (p) =>
-                  !(p.prediction.toUpperCase().trim() == 'O15' &&
-                      (p.predictionOdds == '1.32' || p.predictionOdds.isEmpty)),
-            )
-            .toList();
-        final pool = nonDummy.isNotEmpty ? nonDummy : fixture.predictions;
-        final sorted = List<PredictionModel>.from(pool)
-          ..sort((a, b) {
-            final probCmp = b.probability.compareTo(a.probability);
-            if (probCmp != 0) return probCmp;
-            return (b.effectiveOdds.isNotEmpty ? 1 : 0).compareTo(
-              a.effectiveOdds.isNotEmpty ? 1 : 0,
-            );
-          });
-        return fixture.withPrediction(sorted.first);
-      }
-      return fixture;
+      final predictions = [
+        if (fixture.prediction != null) fixture.prediction!,
+        ...fixture.predictions,
+      ]..sort((a, b) => b.probability.compareTo(a.probability));
+      return predictions.isEmpty
+          ? fixture
+          : fixture.withPrediction(predictions.first);
     }).toList();
   }
   final base = baseHomeMarket(market);
@@ -1004,9 +1146,20 @@ HomeOddsOption? homePredictionOption(
 ) {
   final market = predictionHomeMarket(prediction.prediction, sport);
   if (market == null) return null;
+  final line = predictionTotalLine(prediction.prediction);
+  final exactMarket =
+      line != null &&
+          const {
+            'Over/Under',
+            'Corners',
+            'Cards',
+            'Total Sets',
+          }.contains(market)
+      ? '$market ${_lineLabel(line)}'
+      : market;
   final options = homeMarketOdds(
     fixture.withPrediction(prediction),
-    market,
+    exactMarket,
     sport,
   );
   final rawPick = prediction.prediction.toUpperCase().trim();
@@ -1083,6 +1236,20 @@ HomeOddsOption? homePredictionOption(
         }
       }
     }
+  }
+  final supplied = marketPrice(prediction.predictionOdds);
+  if (supplied.isNotEmpty &&
+      prediction.sportyMarketId.isNotEmpty &&
+      prediction.sportyOutcomeId.isNotEmpty) {
+    return HomeOddsOption(
+      prediction.prediction,
+      prediction.prediction,
+      supplied,
+      exactMarket,
+      sportyMarketId: prediction.sportyMarketId,
+      sportyOutcomeId: prediction.sportyOutcomeId,
+      sportySpecifier: prediction.sportySpecifier,
+    );
   }
   return null;
 }

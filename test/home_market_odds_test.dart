@@ -21,6 +21,212 @@ FixtureModel fixture(
 
 void main() {
   test(
+    'all outcome probabilities survive prediction metadata and JSON copies',
+    () {
+      final match = FixtureModel.fromJson({
+        'id': 'full-probabilities',
+        'sport_id': 1,
+        'prediction': {
+          'id': 'betmines-pick',
+          'provider': 'betmines',
+          'prediction': 'O15',
+          'probability': 86,
+          'probabilities':
+              '{"home":60,"draw":25,"away":15,"over_1_5":86,"under_1_5":14,"over_2_5":65,"under_2_5":35}',
+        },
+      });
+      for (final fixture in [
+        match,
+        FixtureModel.fromJson(match.toJson()),
+        match.withPrediction(match.prediction!),
+        filterHomeFixtures([match], '1X2', 'football').single,
+      ]) {
+        expect(homeOneXTwoProbabilities(fixture), {'1': 60, 'X': 25, '2': 15});
+        expect(homeOutcomeProbability(fixture, '1X2', '1'), 60);
+        expect(homeOutcomeProbability(fixture, '1X2', 'X'), 25);
+        expect(homeOutcomeProbability(fixture, '1X2', '2'), 15);
+        expect(homeOutcomeProbability(fixture, 'Over/Under 1.5', 'O15'), 86);
+        expect(homeOutcomeProbability(fixture, 'Over/Under 1.5', 'U15'), 14);
+        expect(homeOutcomeProbability(fixture, 'Over/Under 2.5', 'U25'), 35);
+      }
+      final nested = FixtureModel.fromJson({
+        'prediction': {
+          'id': 'nested',
+          'prediction': '1',
+          'probabilities': {
+            'extra': {
+              'probabilities': {'home': 55, 'draw': 30, 'away': 15},
+            },
+          },
+        },
+      });
+      expect(homeOneXTwoProbabilities(nested), {'1': 55, 'X': 30, '2': 15});
+    },
+  );
+
+  test('half-goal totals complete the missing side without guessing 1X2', () {
+    final match = FixtureModel.fromJson({
+      'prediction': {'id': 'o15', 'prediction': 'O15', 'probability': 86},
+      'probability': {
+        'over25': 100,
+        'over20': 60,
+        'over225': 65,
+        'home': 70,
+        'over05': 95,
+      },
+    });
+    expect(homeOutcomeProbability(match, 'Over/Under 1.5', 'U15'), 14);
+    expect(homeOutcomeProbability(match, 'Over/Under 2.5', 'U25'), 0);
+    expect(homeOutcomeProbability(match, 'Over/Under 0.5', 'U05'), 5);
+    expect(homeMarketLines(match, 'Over/Under'), contains(0.5));
+    expect(homeOutcomeProbability(match, 'Over/Under 2', 'Under 2'), isNull);
+    expect(
+      homeOutcomeProbability(match, 'Over/Under 2.25', 'Under 2.25'),
+      isNull,
+    );
+    expect(homeOutcomeProbability(match, '1X2', 'X'), isNull);
+    expect(homeOutcomeProbability(match, '1X2', '2'), isNull);
+  });
+
+  test('Riga O15 never uses a team or half total at the same line', () {
+    Map<String, dynamic> total(
+      String id,
+      String name,
+      String line,
+      String odd,
+    ) => {
+      'id': id,
+      'name': name,
+      'specifier': 'total=$line',
+      'outcomes': [
+        {'id': '12', 'name': 'Over $line', 'odds': odd},
+        {'id': '13', 'name': 'Under $line', 'odds': '1.51'},
+      ],
+    };
+    final wrongMarkets = [
+      total('20', 'JDFS Alberts Over/Under', '1.5', '2.26'),
+      total('68', '1st Half - Over/Under', '1.5', '1.82'),
+      total('90', '2nd Half - Over/Under', '1.5', '1.51'),
+      total('19', 'Riga Mariners Over/Under', '2.5', '2.05'),
+      total('18', 'Over/Under', '2.5', '1.31'),
+    ];
+    for (final hasFullMatch in [false, true]) {
+      final match = FixtureModel.fromJson({
+        'id': 'riga-mariners-alberts',
+        'sport_id': 1,
+        'home_team': 'Riga Mariners',
+        'away_team': 'Alberts',
+        'probability': {'over15': 86, 'under15': 14},
+        'prediction': {
+          'id': 'source-1x2',
+          'prediction': '1',
+          'probability': 60,
+          'prediction_odds': '1.56',
+          'sporty_market_id': '1',
+          'sporty_outcome_id': '1',
+        },
+        'markets': {
+          'sporty': [
+            ...wrongMarkets,
+            if (hasFullMatch) total('18', 'Over/Under', '1.5', '1.12'),
+          ],
+        },
+      });
+      final derived = homeMarketProbabilityPrediction(
+        match,
+        'Over/Under 1.5',
+        'football',
+      )!;
+      expect(derived.probability, 86);
+      expect(derived.sportyMarketId, isEmpty);
+      expect(derived.sportyOutcomeId, isEmpty);
+      final option = homePredictionOption(match, derived, 'football');
+      expect(
+        homePredictionOdds(match, derived, 'football'),
+        hasFullMatch ? '1.12' : '',
+      );
+      expect(option?.sportyMarketId ?? '', hasFullMatch ? '18' : '');
+      expect(option?.sportySpecifier ?? '', hasFullMatch ? 'total=1.5' : '');
+    }
+    final onlyScoped = FixtureModel.fromJson({
+      'markets': {'sporty': wrongMarkets.take(4).toList()},
+    });
+    expect(homeMarketLines(onlyScoped, 'Over/Under'), isEmpty);
+  });
+
+  test(
+    'synced alternate totals use their own line even when labels are missing',
+    () {
+      final match = FixtureModel.fromJson({
+        'id': 'synced-total',
+        'sport_id': 1,
+        'home_team': 'Home',
+        'away_team': 'Away',
+        'probability': {
+          'home': 55,
+          'draw': 25,
+          'away': 20,
+          'over15': 88,
+          'under15': 12,
+          'gg': 71,
+          'ng': 29,
+        },
+        'prediction': {
+          'id': 'o15',
+          'provider': 'betmines',
+          'prediction': 'O15',
+          'probability': 88,
+          'prediction_odds': '1.32',
+        },
+        'markets': {
+          'sporty': [
+            {
+              'id': '18',
+              'specifier': 'total=2.5',
+              'outcomes': [
+                {'id': '12', 'odds': '1.90'},
+                {'id': '13', 'odds': '1.80'},
+              ],
+            },
+            {
+              'id': '18',
+              'specifier': 'total=1.5',
+              'outcomes': [
+                {'id': '12', 'odds': '1.35'},
+                {'id': '13', 'odds': '3.10'},
+              ],
+            },
+            {
+              'id': '1',
+              'outcomes': [
+                {'id': '1', 'odds': '2.10'},
+                {'id': '2', 'odds': '3.40'},
+                {'id': '3', 'odds': '3.20'},
+              ],
+            },
+          ],
+        },
+      });
+      final option = homePredictionOption(match, match.prediction!, 'football');
+      expect(option, isNotNull);
+      expect(option!.odd, '1.35');
+      expect(option.sportySpecifier, 'total=1.5');
+      expect(homeMarketOdds(match, '1X2', 'football').map((e) => e.odd), [
+        '2.10',
+        '3.40',
+        '3.20',
+      ]);
+      expect(homeOneXTwoProbabilities(match), {'1': 55, 'X': 25, '2': 20});
+      expect(homeOutcomeProbability(match, 'Over/Under 1.5', 'O15'), 88);
+      expect(homeOutcomeProbability(match, 'Over/Under 1.5', 'U15'), 12);
+      final btts = filterHomeFixtures([match], 'GG/NG', 'football').single;
+      expect(btts.prediction!.probability, 71);
+      expect(homeOutcomeProbability(btts, '1X2', 'X'), 25);
+      expect(match.prediction!.effectiveOdds, '1.32');
+    },
+  );
+
+  test(
     'available provider odds are selected per outcome and survive JSON copies',
     () {
       final match = FixtureModel.fromJson({

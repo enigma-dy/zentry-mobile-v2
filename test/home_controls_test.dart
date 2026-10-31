@@ -48,6 +48,98 @@ Map<String, dynamic> matchJson(
 };
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets(
+    'goals start at 1.5 and every outcome keeps its probability when lines switch',
+    (tester) async {
+      tester.view.physicalSize = const Size(400, 1800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final json = matchJson(
+        'Goals',
+        pick: 'O15',
+        markets: {
+          '1x2': {'home': '2.10', 'draw': '3.40', 'away': '3.20'},
+          'over_under': {
+            '1.5': {'over': '1.30', 'under': '3.50'},
+            '2.5': {'over': '1.91', 'under': '1.83'},
+          },
+        },
+      );
+      (json['predictions'] as List).first['probabilities'] = jsonEncode({
+        'home': 60,
+        'draw': 25,
+        'away': 15,
+        'over_1_5': 86,
+        'under_1_5': 14,
+        'over_2_5': 65,
+        'under_2_5': 35,
+      });
+      final service = SportsService(
+        client: MockClient((request) async {
+          dynamic data = [];
+          if (request.url.path == '/api/v1/fixtures') {
+            return http.Response(
+              jsonEncode({
+                'success': true,
+                'page': 1,
+                'total_pages': 1,
+                'data': [json],
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/api/v1/sports')
+            data = [
+              {'id': 1, 'name': 'Football', 'key': 'football'},
+            ];
+          return http.Response(
+            jsonEncode({'success': true, 'data': data}),
+            200,
+          );
+        }),
+      );
+      await tester.pumpWidget(
+        MaterialApp(home: HomeScreen(sportsService: service)),
+      );
+      await tester.pumpAndSettle();
+      for (final (pick, probability) in [('1', 60), ('X', 25), ('2', 15)]) {
+        final option = find.byKey(ValueKey('home-odds-Goals-$pick'));
+        expect(
+          find.descendant(
+            of: option,
+            matching: find.text('$probability% probability'),
+          ),
+          findsOneWidget,
+        );
+      }
+      final dropdown = find.byKey(
+        const ValueKey('league-market-England - Premier League'),
+      );
+      await tester.ensureVisible(dropdown);
+      await tester.tap(dropdown);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(PopupMenuItem<String>, 'Over/Under'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('1.5'), findsWidgets);
+      expect(find.text('86% probability'), findsWidgets);
+      expect(find.text('14% probability'), findsWidgets);
+      final lineDropdown = find.byKey(
+        const ValueKey('league-line-England - Premier League'),
+      );
+      await tester.ensureVisible(lineDropdown);
+      await tester.tap(lineDropdown);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PopupMenuItem<double>, '2.5'));
+      await tester.pumpAndSettle();
+      expect(find.text('65% probability'), findsWidgets);
+      expect(find.text('35% probability'), findsWidgets);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
   test(
     'markets follow sport and keep football-only options out of other sports',
     () {

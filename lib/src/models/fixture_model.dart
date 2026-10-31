@@ -75,6 +75,30 @@ int _int(dynamic value) =>
     value is num ? value.toInt() : int.tryParse(_string(value)) ?? 0;
 Map<String, dynamic> _map(dynamic value) =>
     value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{};
+Map<String, dynamic> _predictionProbabilities(dynamic raw) {
+  if (raw is String) {
+    try {
+      raw = jsonDecode(raw);
+    } on FormatException {
+      return const {};
+    }
+  }
+  final result = <String, dynamic>{};
+  for (final entry in _map(raw).entries) {
+    if (const {
+      'extra',
+      'probabilities',
+      'probability',
+      'market_probabilities',
+    }.contains(entry.key)) {
+      result.addAll(_predictionProbabilities(entry.value));
+    } else if (entry.value is num || entry.value is String) {
+      result[entry.key] = entry.value;
+    }
+  }
+  return result;
+}
+
 String _jsonString(dynamic value) =>
     value is String ? value : jsonEncode(value ?? <String, dynamic>{});
 
@@ -215,6 +239,8 @@ class FixtureMarketsModel {
 }
 
 class PredictionModel {
+  final Map<String, dynamic> marketProbabilities;
+  final Map<String, dynamic> bookmakers;
   final String id;
   final String? fixtureId;
   final int sportId;
@@ -240,6 +266,8 @@ class PredictionModel {
   final String leagueName;
   final DateTime? matchTime;
   const PredictionModel({
+    this.marketProbabilities = const {},
+    this.bookmakers = const {},
     required this.id,
     this.fixtureId,
     this.sportId = 1,
@@ -299,69 +327,72 @@ class PredictionModel {
         _validOdds(marketOdds['odd_no_goal']).isNotEmpty) {
       return marketOdds['odd_no_goal']!;
     }
-    if (predictionOdds.isNotEmpty &&
-        _validOdds(predictionOdds).isNotEmpty &&
-        !(p == 'O15' && predictionOdds == '1.32')) {
+    if (predictionOdds.isNotEmpty && _validOdds(predictionOdds).isNotEmpty) {
       return predictionOdds;
     }
     return '';
   }
 
-  factory PredictionModel.fromJson(Map<String, dynamic> json) =>
-      PredictionModel(
-        id: _string(json['id']),
-        fixtureId: json['fixture_id'] == null
-            ? null
-            : _string(json['fixture_id']),
-        sportId: _int(json['sport_id']) == 0 ? 1 : _int(json['sport_id']),
-        sportyEventId: _string(json['sporty_event_id']),
-        sportyMarketId: _string(json['sporty_market_id']),
-        sportyOutcomeId: _string(json['sporty_outcome_id']),
-        sportySpecifier: _string(json['sporty_specifier']),
-        provider: _string(json['provider']).isNotEmpty
-            ? _string(json['provider'])
-            : _string(json['source']),
-        market: _string(json['market']),
-        tag: _string(json['tag']),
-        isPlayerProp: json['is_player_prop'] == true,
-        prediction: _string(json['prediction']).isNotEmpty
-            ? _string(json['prediction'])
-            : _string(json['selection']),
-        predictionOdds: _string(json['prediction_odds']).isNotEmpty
-            ? _string(json['prediction_odds'])
-            : _string(json['odds']),
-        probability: _int(json['probability']) > 0
-            ? _int(json['probability'])
-            : _int(json['confidence']),
-        status: _string(json['status']).isEmpty
-            ? 'pending'
-            : _string(json['status']),
-        suggestionResult: json['suggestion_result'] == null
-            ? null
-            : _int(json['suggestion_result']),
-        odd1: _string(json['odd_1']),
-        oddX: _string(json['odd_x']),
-        odd2: _string(json['odd_2']),
-        marketOdds: {
-          for (final key in [
-            'odd_1x',
-            'odd_12',
-            'odd_x2',
-            'odd_over_25',
-            'odd_under_25',
-            'odd_goal',
-            'odd_no_goal',
-          ])
-            key: _string(json[key]),
-        },
-        homeTeam: _string(json['home_team']),
-        awayTeam: _string(json['away_team']),
-        leagueName: _string(json['league_name']).isNotEmpty
-            ? _string(json['league_name'])
-            : _string(json['league']),
-        matchTime: DateTime.tryParse(_string(json['match_time'])),
-      );
+  factory PredictionModel.fromJson(
+    Map<String, dynamic> json,
+  ) => PredictionModel(
+    marketProbabilities: _predictionProbabilities(
+      json['probabilities'] ?? json['market_probabilities'] ?? json['extra'],
+    ),
+    bookmakers: _map(json['bookmakers']),
+    id: _string(json['id']),
+    fixtureId: json['fixture_id'] == null ? null : _string(json['fixture_id']),
+    sportId: _int(json['sport_id']) == 0 ? 1 : _int(json['sport_id']),
+    sportyEventId: _string(json['sporty_event_id']),
+    sportyMarketId: _string(json['sporty_market_id']),
+    sportyOutcomeId: _string(json['sporty_outcome_id']),
+    sportySpecifier: _string(json['sporty_specifier']),
+    provider: _string(json['provider']).isNotEmpty
+        ? _string(json['provider'])
+        : _string(json['source']),
+    market: _string(json['market']),
+    tag: _string(json['tag']),
+    isPlayerProp: json['is_player_prop'] == true,
+    prediction: _string(json['prediction']).isNotEmpty
+        ? _string(json['prediction'])
+        : _string(json['selection']),
+    predictionOdds: _string(json['prediction_odds']).isNotEmpty
+        ? _string(json['prediction_odds'])
+        : _string(json['odds']),
+    probability: _int(json['probability']) > 0
+        ? _int(json['probability'])
+        : _int(json['confidence']),
+    status: _string(json['status']).isEmpty
+        ? 'pending'
+        : _string(json['status']),
+    suggestionResult: json['suggestion_result'] == null
+        ? null
+        : _int(json['suggestion_result']),
+    odd1: _string(json['odd_1']),
+    oddX: _string(json['odd_x']),
+    odd2: _string(json['odd_2']),
+    marketOdds: {
+      for (final key in [
+        'odd_1x',
+        'odd_12',
+        'odd_x2',
+        'odd_over_25',
+        'odd_under_25',
+        'odd_goal',
+        'odd_no_goal',
+      ])
+        key: _string(json[key]),
+    },
+    homeTeam: _string(json['home_team']),
+    awayTeam: _string(json['away_team']),
+    leagueName: _string(json['league_name']).isNotEmpty
+        ? _string(json['league_name'])
+        : _string(json['league']),
+    matchTime: DateTime.tryParse(_string(json['match_time'])),
+  );
   Map<String, dynamic> toJson() => {
+    if (marketProbabilities.isNotEmpty) 'probabilities': marketProbabilities,
+    if (bookmakers.isNotEmpty) 'bookmakers': bookmakers,
     'id': id,
     if (fixtureId != null) 'fixture_id': fixtureId,
     'sport_id': sportId,
@@ -480,12 +511,12 @@ class FixtureModel {
         },
       });
       for (final line in const ['1.5', '3.5']) {
-        final over = pick == 'O${line.replaceAll('.', '')}' ||
-                pick == 'OVER $line'
+        final over =
+            pick == 'O${line.replaceAll('.', '')}' || pick == 'OVER $line'
             ? odd
             : '';
-        final under = pick == 'U${line.replaceAll('.', '')}' ||
-                pick == 'UNDER $line'
+        final under =
+            pick == 'U${line.replaceAll('.', '')}' || pick == 'UNDER $line'
             ? odd
             : '';
         if (over.isNotEmpty || under.isNotEmpty) {
@@ -659,10 +690,7 @@ class FixtureModel {
       marketProbabilities: _map(json['probability']),
       providerMappings: mappings,
       sportyBetAvailable: json['sportybet_available'] == true,
-      sportyBetSynced:
-          json['sportybet_synced'] == true ||
-          (json['sportybet_available'] == true &&
-              _string(json['sporty_event_id']).isNotEmpty),
+      sportyBetSynced: json['sportybet_synced'] == true,
       sportyEventId: _string(json['sporty_event_id']),
       markets: json['markets'] is Map
           ? FixtureMarketsModel.fromJson(_map(json['markets']))
