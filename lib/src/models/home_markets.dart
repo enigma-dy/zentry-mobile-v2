@@ -1259,6 +1259,25 @@ String homePredictionOdds(
   PredictionModel prediction,
   String sport,
 ) {
+  if (sport.toLowerCase() == 'football' && prediction.provider.isNotEmpty) {
+    if (prediction.oddsSource.isNotEmpty) {
+      return prediction.hasApprovedPredictionPrice
+          ? marketPrice(prediction.effectiveOdds)
+          : '';
+    }
+    final option = homePredictionOption(fixture, prediction, sport);
+    if (option != null &&
+        option.sportyMarketId.isNotEmpty &&
+        option.sportyOutcomeId.isNotEmpty &&
+        option.odd.isNotEmpty) {
+      return option.odd;
+    }
+    // Generic fixture markets may contain historical model-provider prices.
+    // For a prediction, use only the response's approved selected price.
+    return prediction.hasApprovedPredictionPrice
+        ? marketPrice(prediction.effectiveOdds)
+        : '';
+  }
   final price = homePredictionOption(fixture, prediction, sport)?.odd ?? '';
   return price.isNotEmpty ? price : fixture.oddsForPrediction(prediction);
 }

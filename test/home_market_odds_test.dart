@@ -31,6 +31,9 @@ void main() {
         'probability': 65,
         'confidence': 65,
         'odds': 1.08,
+        'sporty_market_id': '18',
+        'sporty_outcome_id': '12',
+        'sporty_specifier': 'total=1.5',
       };
       expect(predictionConfidenceLabel(item), 'Estimate under review');
       expect(predictionConfidenceLabel({...item, 'odds': 1.50}), '65%');
@@ -613,4 +616,84 @@ void main() {
     expect(groups.keys.toList(), ['Zulu', 'Alpha']);
     expect(groups['Zulu']!.length, 2);
   });
+  test(
+    'TalkFootball predictions keep probabilities but require approved prices',
+    () {
+      final prediction = PredictionModel.fromJson({
+        'id': 'tf',
+        'provider': 'talkfootball',
+        'prediction': 'O15',
+        'prediction_odds': '2.35',
+        'probability': 86,
+      });
+      final match = FixtureModel.fromJson({
+        'id': 'brisbane',
+        'sport_id': 1,
+        'markets': {
+          'over_under': {'line': '1.5', 'over': '2.35'},
+        },
+        'predictions': [prediction.toJson()],
+      });
+      expect(prediction.effectiveOdds, isEmpty);
+      expect(homePredictionOdds(match, prediction, 'football'), isEmpty);
+      expect(prediction.probability, 86);
+      final fallback = PredictionModel.fromJson({
+        ...prediction.toJson(),
+        'prediction_odds': '1.23',
+        'odds_source': 'betmines',
+      });
+      expect(homePredictionOdds(match, fallback, 'football'), '1.23');
+      expect(
+        PredictionModel.fromJson(fallback.toJson()).oddsSource,
+        'betmines',
+      );
+      expect(fallback.probability, 86);
+    },
+  );
+  test('Sporty selected price overrides the models per-market column', () {
+    final p = PredictionModel.fromJson({
+      'id': 'p',
+      'provider': 'betmines',
+      'prediction': '1',
+      'prediction_odds': '1.43',
+      'odd_1': '2.35',
+      'odds_source': 'sporty',
+    });
+    expect(p.effectiveOdds, '1.43');
+  });
+  test(
+    'approved Betmines prediction price wins over a later fixture snapshot',
+    () {
+      final match = FixtureModel.fromJson({
+        'id': 'brisbane',
+        'sport_id': 1,
+        'markets': {
+          'sporty': [
+            {
+              'id': '18',
+              'specifier': 'total=1.5',
+              'outcomes': [
+                {'id': '12', 'name': 'Over 1.5', 'odds': '2.35'},
+              ],
+            },
+          ],
+        },
+      });
+      final p = PredictionModel.fromJson({
+        'id': 'tf',
+        'provider': 'talkfootball',
+        'prediction': 'O15',
+        'probability': 86,
+        'prediction_odds': '1.12',
+        'odds_source': 'betmines',
+      });
+      expect(homePredictionOdds(match, p, 'football'), '1.12');
+      final unavailable = PredictionModel.fromJson({
+        ...p.toJson(),
+        'prediction_odds': '0',
+        'odds_source': 'unavailable',
+      });
+      expect(homePredictionOdds(match, unavailable, 'football'), isEmpty);
+    },
+  );
 }

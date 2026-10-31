@@ -70,6 +70,8 @@ void main() {
         {
           'id': 'tf-sandviken',
           'provider': 'talkfootball',
+          'prediction_odds': '1.08',
+          'odds_source': 'sporty',
           'prediction': 'O15',
           'probability': 65,
         },

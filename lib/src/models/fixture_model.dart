@@ -254,6 +254,7 @@ class PredictionModel {
   final bool isPlayerProp;
   final String prediction;
   final String predictionOdds;
+  final String oddsSource;
   final int probability;
   final String status;
   final int? suggestionResult;
@@ -281,6 +282,7 @@ class PredictionModel {
     this.isPlayerProp = false,
     required this.prediction,
     this.predictionOdds = '',
+    this.oddsSource = '',
     this.probability = 0,
     this.status = 'pending',
     this.suggestionResult,
@@ -297,7 +299,22 @@ class PredictionModel {
   bool get isLost => status.toLowerCase() == 'lost' || suggestionResult == 2;
   bool get isPending => !isWon && !isLost;
   String get selection => prediction;
+  bool get hasApprovedPredictionPrice =>
+      sportId != 1 ||
+      provider.isEmpty ||
+      provider == 'betmines' ||
+      provider == 'sporty' ||
+      oddsSource == 'betmines' ||
+      oddsSource == 'sporty' ||
+      (sportyMarketId.isNotEmpty && sportyOutcomeId.isNotEmpty);
+
   String get effectiveOdds {
+    if (!hasApprovedPredictionPrice) return '';
+    if ((oddsSource == 'sporty' ||
+            oddsSource == 'betmines' ||
+            (sportyMarketId.isNotEmpty && sportyOutcomeId.isNotEmpty)) &&
+        _validOdds(predictionOdds).isNotEmpty)
+      return predictionOdds;
     final p = prediction.toUpperCase().trim();
     if (p == '1' && _validOdds(odd1).isNotEmpty) return odd1;
     if (p == 'X' && _validOdds(oddX).isNotEmpty) return oddX;
@@ -340,6 +357,7 @@ class PredictionModel {
       json['probabilities'] ?? json['market_probabilities'] ?? json['extra'],
     ),
     bookmakers: _map(json['bookmakers']),
+    oddsSource: _string(json['odds_source']),
     id: _string(json['id']),
     fixtureId: json['fixture_id'] == null ? null : _string(json['fixture_id']),
     sportId: _int(json['sport_id']) == 0 ? 1 : _int(json['sport_id']),
@@ -406,6 +424,7 @@ class PredictionModel {
     'is_player_prop': isPlayerProp,
     'prediction': prediction,
     'prediction_odds': predictionOdds,
+    'odds_source': oddsSource,
     'probability': probability,
     'status': status,
     if (suggestionResult != null) 'suggestion_result': suggestionResult,
@@ -479,6 +498,7 @@ class FixtureModel {
   FixtureMarketsModel get effectiveMarkets {
     var prices = markets?.toJson() ?? <String, dynamic>{};
     for (final p in [?prediction, ...predictions]) {
+      if (!p.hasApprovedPredictionPrice) continue;
       final pick = p.prediction.toUpperCase().trim();
       final odd = p.effectiveOdds;
       prices = _mergeMarketPrices(prices, {
