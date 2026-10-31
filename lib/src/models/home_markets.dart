@@ -1294,6 +1294,17 @@ class HomeProbabilityReview {
 }
 
 String predictionConfidenceLabel(Map<String, dynamic> item) {
+  if ((item['source'] ?? item['provider']) == 'betexplorer') {
+    final extra = item['extra'];
+    if (extra is! Map ||
+        extra['probability_source'] != 'forebet' ||
+        extra['probability_kind'] != 'model')
+      return '\u2014';
+    final value = double.tryParse(item['probability']?.toString() ?? '');
+    return value != null && value.isFinite && value >= 0 && value <= 100
+        ? '${value.round()}%'
+        : '\u2014';
+  }
   if (item['probability_review'] is Map &&
       (item['probability_review'] as Map).isNotEmpty) {
     return 'Estimate under review';
