@@ -1297,7 +1297,7 @@ String predictionConfidenceLabel(Map<String, dynamic> item) {
   if ((item['source'] ?? item['provider']) == 'betexplorer') {
     final extra = item['extra'];
     if (extra is! Map ||
-        extra['probability_source'] != 'forebet' ||
+        extra['probability_source'] != 'betmines' ||
         extra['probability_kind'] != 'model')
       return '\u2014';
     final value = double.tryParse(item['probability']?.toString() ?? '');

@@ -21,14 +21,14 @@ FixtureModel fixture(
 
 void main() {
   test(
-    'Popular threshold uses preferences while only Forebet supplies the quote',
+    'Popular threshold uses preferences while local Betmines supplies the quote',
     () {
       final item = <String, dynamic>{
         'source': 'betexplorer',
         'votes_percent': 95,
         'probability': 38,
         'confidence': 38,
-        'extra': {'probability_source': 'forebet', 'probability_kind': 'model'},
+        'extra': {'probability_source': 'betmines', 'probability_kind': 'model'},
         'probability_review': {'reason': 'model_market_disagreement'},
       };
       expect(predictionConfidenceLabel(item), '38%');
