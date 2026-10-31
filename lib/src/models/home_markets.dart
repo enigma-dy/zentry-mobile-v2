@@ -1274,6 +1274,24 @@ class HomeProbabilityReview {
   );
 }
 
+String predictionConfidenceLabel(Map<String, dynamic> item) {
+  if (item['probability_review'] is Map &&
+      (item['probability_review'] as Map).isNotEmpty) {
+    return 'Estimate under review';
+  }
+  final prediction = PredictionModel.fromJson(item);
+  final fixture = FixtureModel.fromJson({
+    'sport_id': item['sport_id'] ?? 1,
+    'status': item['match_status'] ?? 'prematch',
+    'prediction': item,
+  });
+  if (homePredictionProbabilityReview(fixture, prediction, 'football') !=
+      null) {
+    return 'Estimate under review';
+  }
+  return '${zaiPredictionConfidence(item)}%';
+}
+
 // Match the probability to this provider's own selection before using its
 // generic tip percentage. Never use another total line's percentage.
 int? homePredictionProbability(

@@ -8271,7 +8271,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   child: Text(
-                    '$displayedConfidence%',
+                    predictionConfidenceLabel(item),
                     style: const TextStyle(
                       color: Color(0xFFFFD700),
                       fontSize: 11,

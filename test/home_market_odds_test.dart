@@ -21,6 +21,31 @@ FixtureModel fixture(
 
 void main() {
   test(
+    'prediction feed cards flag disagreements with old and new backend payloads',
+    () {
+      final item = <String, dynamic>{
+        'id': 'sandviken',
+        'sport_id': 1,
+        'source': 'talkfootball',
+        'selection': 'Over 1.5',
+        'probability': 65,
+        'confidence': 65,
+        'odds': 1.08,
+      };
+      expect(predictionConfidenceLabel(item), 'Estimate under review');
+      expect(predictionConfidenceLabel({...item, 'odds': 1.50}), '65%');
+      expect(
+        predictionConfidenceLabel({
+          ...item,
+          'odds': 1.50,
+          'probability_review': {'reason': 'model_market_disagreement'},
+        }),
+        'Estimate under review',
+      );
+      expect(item['probability'], 65);
+    },
+  );
+  test(
     'Sandviken Bjarg O15 1.08 and model 65 triggers review without rewriting either',
     () {
       final match = FixtureModel.fromJson({
