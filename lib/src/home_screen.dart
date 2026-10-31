@@ -6785,9 +6785,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           )
                                         : null,
                                     child: Container(
-                                      height: outcomeProbability == null
-                                          ? 36
-                                          : 47,
+                                      height: 47,
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 6,
                                       ),
@@ -6854,10 +6852,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                               ),
                                             ],
                                           ),
-                                          if (outcomeProbability != null) ...[
+                                          ...[
                                             const SizedBox(height: 2),
                                             Text(
-                                              '$outcomeProbability% probability',
+                                              outcomeProbability == null
+                                                  ? '-'
+                                                  : '$outcomeProbability% probability',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
                                               style: TextStyle(
                                                 color: isSelected
                                                     ? const Color(0xFF234D35)
