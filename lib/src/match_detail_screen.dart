@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'models/fixture_model.dart';
+import 'models/home_markets.dart';
 import 'services/sports_service.dart';
 import 'live_stream_sheet.dart';
 
@@ -790,7 +791,21 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
                       pred.prediction,
                     ) ??
                     false;
-                final predOdds = double.tryParse(fx.oddsForPrediction(pred));
+                final predOdds = double.tryParse(
+                  fx.sportId == 1
+                      ? homePredictionOdds(fx, pred, 'football')
+                      : fx.oddsForPrediction(pred),
+                );
+                final predProbability = homePredictionProbability(
+                  fx,
+                  pred,
+                  'football',
+                );
+                final predReview = homePredictionProbabilityReview(
+                  fx,
+                  pred,
+                  'football',
+                );
 
                 return InkWell(
                   onTap: predOdds == null
@@ -872,9 +887,11 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
                                   ],
                                 ],
                               ),
-                              if (pred.probability > 0)
+                              if (predProbability != null)
                                 Text(
-                                  '${pred.probability}% probability • Tap to ${isPredSelected ? "remove from" : "add to"} ticket bucket',
+                                  predReview != null
+                                      ? 'Estimate under review: model $predProbability%; odds imply ${predReview.rawImpliedProbability.toStringAsFixed(1)}% (before margin adjustment).'
+                                      : '$predProbability% probability • Tap to ${isPredSelected ? "remove from" : "add to"} ticket bucket',
                                   style: TextStyle(
                                     color: mutedTextColor,
                                     fontSize: 11,

@@ -21,6 +21,83 @@ FixtureModel fixture(
 
 void main() {
   test(
+    'Sandviken Bjarg O15 1.08 and model 65 triggers review without rewriting either',
+    () {
+      final match = FixtureModel.fromJson({
+        'id': 'sandviken-bjarg',
+        'sport_id': 1,
+        'status': 'prematch',
+        'home_team': 'IL Sandviken',
+        'away_team': 'Bjarg',
+        'prediction': {
+          'id': 'tf-sandviken',
+          'provider': 'talkfootball',
+          'prediction': 'O15',
+          'probability': 65,
+        },
+        'markets': {
+          'sporty': [
+            {
+              'id': '18',
+              'name': 'Over/Under',
+              'specifier': 'total=1.5',
+              'outcomes': [
+                {'id': '12', 'name': 'Over 1.5', 'odds': '1.08'},
+                {'id': '13', 'name': 'Under 1.5', 'odds': '7.30'},
+              ],
+            },
+          ],
+        },
+      });
+      final review = homePredictionProbabilityReview(
+        match,
+        match.prediction!,
+        'football',
+      );
+      expect(review, isNotNull);
+      expect(review!.modelProbability, 65);
+      expect(review.rawImpliedProbability, closeTo(92.5926, 0.001));
+      expect(review.gap, greaterThan(25));
+      expect(homePredictionOdds(match, match.prediction!, 'football'), '1.08');
+      expect(match.prediction!.probability, 65);
+      final live = FixtureModel.fromJson({...match.toJson(), 'status': 'live'});
+      expect(
+        homePredictionProbabilityReview(live, live.prediction!, 'football'),
+        isNull,
+      );
+      expect(
+        homeOutcomeProbabilityReview(
+          match,
+          'Over/Under',
+          'Over 2',
+          '1.08',
+          probability: 65,
+        ),
+        isNull,
+      );
+    },
+  );
+
+  test('prediction probability uses its exact source selection breakdown', () {
+    final match = FixtureModel.fromJson({
+      'sport_id': 1,
+      'prediction': {
+        'id': 'stale-tip',
+        'prediction': 'O15',
+        'probability': 65,
+        'probabilities': {'over_1_5': 93, 'over_2_5': 65},
+      },
+      'markets': {
+        'over_under': {'line': '1.5', 'over': '1.08'},
+      },
+    });
+    expect(homePredictionProbability(match, match.prediction!, 'football'), 93);
+    expect(
+      homePredictionProbabilityReview(match, match.prediction!, 'football'),
+      isNull,
+    );
+  });
+  test(
     'all outcome probabilities survive prediction metadata and JSON copies',
     () {
       final match = FixtureModel.fromJson({

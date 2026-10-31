@@ -1262,3 +1262,84 @@ String homePredictionOdds(
   final price = homePredictionOption(fixture, prediction, sport)?.odd ?? '';
   return price.isNotEmpty ? price : fixture.oddsForPrediction(prediction);
 }
+
+class HomeProbabilityReview {
+  final int modelProbability;
+  final double rawImpliedProbability;
+  final double gap;
+  const HomeProbabilityReview(
+    this.modelProbability,
+    this.rawImpliedProbability,
+    this.gap,
+  );
+}
+
+// Match the probability to this provider's own selection before using its
+// generic tip percentage. Never use another total line's percentage.
+int? homePredictionProbability(
+  FixtureModel fixture,
+  PredictionModel prediction,
+  String sport,
+) {
+  final market = predictionHomeMarket(prediction.prediction, sport);
+  if (market == null)
+    return prediction.probability > 0 ? prediction.probability : null;
+  final own = FixtureModel.fromJson({
+    'id': fixture.id,
+    'sport_id': fixture.sportId,
+    'prediction': prediction.toJson(),
+    'probability': prediction.marketProbabilities,
+  });
+  return homeOutcomeProbability(own, market, prediction.prediction);
+}
+
+HomeProbabilityReview? homeOutcomeProbabilityReview(
+  FixtureModel fixture,
+  String market,
+  String selection,
+  String price, {
+  int? probability,
+}) {
+  if (fixture.sportId != 0 && fixture.sportId != 1 ||
+      fixture.isLive ||
+      fixture.isFinished)
+    return null;
+  final base = baseHomeMarket(market);
+  if (!const {'1X2', 'Double Chance', 'GG/NG', 'Over/Under'}.contains(base))
+    return null;
+  if (base == 'Over/Under') {
+    final line = predictionTotalLine(selection);
+    if (line == null || line - line.floor() != 0.5) return null;
+  }
+  final model =
+      probability ?? homeOutcomeProbability(fixture, market, selection);
+  final odds = double.tryParse(price);
+  if (model == null ||
+      model <= 0 ||
+      model > 100 ||
+      odds == null ||
+      !odds.isFinite ||
+      odds <= 1)
+    return null;
+  // Raw implied probability includes bookmaker margin. A gap is a review
+  // signal, not proof that the provider's estimate is wrong.
+  final implied = 100 / odds;
+  final gap = (model - implied).abs();
+  return gap > 25 ? HomeProbabilityReview(model, implied, gap) : null;
+}
+
+HomeProbabilityReview? homePredictionProbabilityReview(
+  FixtureModel fixture,
+  PredictionModel prediction,
+  String sport,
+) {
+  final market = predictionHomeMarket(prediction.prediction, sport);
+  if (market == null) return null;
+  return homeOutcomeProbabilityReview(
+    fixture,
+    market,
+    prediction.prediction,
+    homePredictionOdds(fixture, prediction, sport),
+    probability: homePredictionProbability(fixture, prediction, sport),
+  );
+}

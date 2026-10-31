@@ -6149,9 +6149,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   final predOdds = hasPred
                       ? homePredictionOdds(fx, pred, _activeSportKey)
                       : '';
-                  final predProb = hasPred && pred.probability > 0
-                      ? pred.probability
+                  final predProb = hasPred
+                      ? homePredictionProbability(fx, pred, _activeSportKey) ??
+                            0
                       : 0;
+                  final predReview = hasPred
+                      ? homePredictionProbabilityReview(
+                          fx,
+                          pred,
+                          _activeSportKey,
+                        )
+                      : null;
                   final isWon = hasPred && pred.isWon;
                   final isLost = hasPred && pred.isLost;
                   final predOption = hasPred
@@ -6661,9 +6669,18 @@ class _HomeScreenState extends State<HomeScreen> {
                                             ),
                                           ),
                                           child: Text(
-                                            '$predProb%',
-                                            style: const TextStyle(
-                                              color: Color(0xFF69F0AE),
+                                            predReview != null
+                                                ? 'Estimate under review'
+                                                : '$predProb%',
+                                            key: predReview != null
+                                                ? ValueKey(
+                                                    'home-probability-review-${fx.id}',
+                                                  )
+                                                : null,
+                                            style: TextStyle(
+                                              color: predReview != null
+                                                  ? const Color(0xFFFFD700)
+                                                  : const Color(0xFF69F0AE),
                                               fontSize: 9,
                                               fontWeight: FontWeight.w800,
                                             ),
@@ -6759,8 +6776,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                   _selectedTicketItems.containsKey(key);
                               final hasOdd = opt.odd.isNotEmpty;
                               final outcomeProbability = homeOutcomeProbability(
-                                fx, market, opt.selection,
+                                fx,
+                                market,
+                                opt.selection,
                               );
+                              final outcomeReview =
+                                  homeOutcomeProbabilityReview(
+                                    fx,
+                                    market,
+                                    opt.selection,
+                                    opt.odd,
+                                  );
 
                               return Expanded(
                                 child: Padding(
@@ -6855,7 +6881,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ...[
                                             const SizedBox(height: 2),
                                             Text(
-                                              outcomeProbability == null
+                                              outcomeReview != null
+                                                  ? 'Review estimate'
+                                                  : outcomeProbability == null
                                                   ? '-'
                                                   : '$outcomeProbability% probability',
                                               maxLines: 1,
@@ -6863,6 +6891,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                               style: TextStyle(
                                                 color: isSelected
                                                     ? const Color(0xFF234D35)
+                                                    : outcomeReview != null
+                                                    ? const Color(0xFFFFD700)
                                                     : const Color(0xFF69F0AE),
                                                 fontWeight: FontWeight.w800,
                                                 fontSize: 8,

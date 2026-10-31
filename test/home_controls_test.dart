@@ -50,6 +50,68 @@ Map<String, dynamic> matchJson(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   testWidgets(
+    'Sandviken model and market disagreement is visibly marked for review',
+    (tester) async {
+      tester.view.physicalSize = const Size(400, 1800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final fixture = matchJson(
+        'Sandviken',
+        pick: 'O15',
+        markets: {
+          'over_under': {'line': '1.5', 'over': '1.08', 'under': '7.30'},
+        },
+      );
+      fixture['status'] = 'prematch';
+      fixture['home_team'] = 'IL Sandviken';
+      fixture['away_team'] = 'Bjarg';
+      fixture['predictions'] = [
+        {
+          'id': 'tf-sandviken',
+          'provider': 'talkfootball',
+          'prediction': 'O15',
+          'probability': 65,
+        },
+      ];
+      final service = SportsService(
+        client: MockClient((request) async {
+          dynamic data = [];
+          if (request.url.path == '/api/v1/fixtures') {
+            return http.Response(
+              jsonEncode({
+                'success': true,
+                'page': 1,
+                'total_pages': 1,
+                'data': [fixture],
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/api/v1/sports')
+            data = [
+              {'id': 1, 'name': 'Football', 'key': 'football'},
+            ];
+          return http.Response(
+            jsonEncode({'success': true, 'data': data}),
+            200,
+          );
+        }),
+      );
+      await tester.pumpWidget(
+        MaterialApp(home: HomeScreen(sportsService: service)),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('home-probability-review-Sandviken')),
+        findsOneWidget,
+      );
+      expect(find.text('Estimate under review'), findsOneWidget);
+      expect(find.text('65%'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+  testWidgets(
     'goals start at 1.5 and every outcome keeps its probability when lines switch',
     (tester) async {
       tester.view.physicalSize = const Size(400, 1800);
