@@ -57,7 +57,11 @@ class _FplDuelViewState extends State<FplDuelView> {
     try {
       final gwFuture = _service.getGameweekStatus();
       final teamFuture = _service.getMyTeam();
-      final walletFuture = _service.getWallet();
+      // Wallet refresh must not depend on FPL or lobby availability.
+      final walletFuture = _service.getWallet().then((wallet) {
+        if (mounted) setState(() => _wallet = wallet);
+        return wallet;
+      });
       final lobbyFuture = _service.getLobbyChallenges(
         mode: _selectedModeFilter == 'ALL' ? null : _selectedModeFilter,
         minStake: _selectedStakeFilter,
@@ -73,6 +77,7 @@ class _FplDuelViewState extends State<FplDuelView> {
         myChallengesFuture,
       ]);
 
+      if (!mounted) return;
       setState(() {
         _gameweek = results[0] as FplGameweekModel;
         _myTeam = results[1] as FplTeamModel?;
@@ -82,6 +87,7 @@ class _FplDuelViewState extends State<FplDuelView> {
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
@@ -1731,7 +1737,12 @@ class _FplDuelViewState extends State<FplDuelView> {
     );
   }
 
-  void _showDepositDialog() {
+  Future<void> _showDepositDialog() async {
+    final pendingReference = await _service.pendingWalletReference();
+    if (!mounted) return;
+    final referenceController = TextEditingController(
+      text: pendingReference ?? "",
+    );
     int selectedAmount = 5000;
     String selectedProvider = 'paystack';
     final customAmountController = TextEditingController(text: '5000');
@@ -2237,33 +2248,40 @@ class _FplDuelViewState extends State<FplDuelView> {
                                       amountNgn: selectedAmount.toDouble(),
                                     );
 
+                                if (!mounted || !sheetCtx.mounted) return;
                                 final checkoutUrl =
                                     checkout['checkout_url'] as String?;
                                 if (checkoutUrl != null &&
                                     checkoutUrl.isNotEmpty) {
-                                  final completed =
-                                      await PaymentCheckoutScreen.open(
-                                        this.context,
-                                        checkoutUrl: checkoutUrl,
-                                        title: 'Fund Duel Wallet',
-                                      );
+                                  referenceController.text =
+                                      checkout['reference']?.toString() ?? '';
+                                  await PaymentCheckoutScreen.open(
+                                    context,
+                                    checkoutUrl: checkoutUrl,
+                                    title: 'Fund Duel Wallet',
+                                  );
 
-                                  if (completed != null) {
-                                    if (!mounted) return;
-                                    setModalState(() {
-                                      isProcessing = false;
-                                      statusMessage = completed
-                                          ? 'Checkout closed. Tap "I Have Paid" to confirm your payment.'
-                                          : 'Checkout paused. You can reopen it to finish payment.';
-                                    });
-                                    return;
-                                  }
+                                  if (!mounted || !sheetCtx.mounted) return;
+                                  final payment = await _service
+                                      .verifyWalletPayment(
+                                        referenceController.text,
+                                      );
+                                  await _loadData();
+                                  if (!mounted || !sheetCtx.mounted) return;
+                                  setModalState(() {
+                                    isProcessing = false;
+                                    statusMessage =
+                                        payment['message']?.toString() ??
+                                        'Payment is awaiting confirmation.';
+                                  });
+                                  return;
                                 }
 
                                 throw Exception(
                                   'Could not open the secure checkout URL.',
                                 );
                               } catch (e) {
+                                if (!mounted || !sheetCtx.mounted) return;
                                 setModalState(() {
                                   isProcessing = false;
                                   statusMessage = 'Error: $e';
@@ -2297,32 +2315,62 @@ class _FplDuelViewState extends State<FplDuelView> {
                   ),
 
                   // If checkout was opened, show Verify / Complete button
-                  if (statusMessage != null &&
-                      statusMessage!.contains('Checkout opened')) ...[
+                  ...[
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: referenceController,
+                      enabled: !isProcessing,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        labelText:
+                            'Payment reference (check an earlier payment)',
+                      ),
+                    ),
                     const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
                       height: 46,
                       child: OutlinedButton.icon(
-                        onPressed: () async {
-                          Navigator.pop(sheetCtx);
-                          await _loadData();
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Refreshed wallet balances!'),
-                                backgroundColor: Color(0xFF00FF87),
-                              ),
-                            );
-                          }
-                        },
+                        onPressed: isProcessing
+                            ? null
+                            : () async {
+                                if (referenceController.text.trim().isEmpty) {
+                                  setModalState(
+                                    () => statusMessage =
+                                        'Enter your payment reference first.',
+                                  );
+                                  return;
+                                }
+                                setModalState(() => isProcessing = true);
+                                try {
+                                  final payment = await _service
+                                      .verifyWalletPayment(
+                                        referenceController.text,
+                                      );
+                                  await _loadData();
+                                  if (!mounted || !sheetCtx.mounted) return;
+                                  setModalState(() {
+                                    isProcessing = false;
+                                    statusMessage =
+                                        payment['message']?.toString() ??
+                                        'Payment is awaiting confirmation.';
+                                  });
+                                } catch (error) {
+                                  if (!mounted || !sheetCtx.mounted) return;
+                                  setModalState(() {
+                                    isProcessing = false;
+                                    statusMessage =
+                                        'Could not confirm payment: $error';
+                                  });
+                                }
+                              },
                         icon: const Icon(
                           Icons.check_circle_outline,
                           color: Color(0xFF00FF87),
                           size: 18,
                         ),
                         label: const Text(
-                          'I Have Completed Payment',
+                          'Check Payment Status',
                           style: TextStyle(color: Color(0xFF00FF87)),
                         ),
                         style: OutlinedButton.styleFrom(

@@ -104,6 +104,7 @@ void main() {
       );
       expect(find.textContaining('Probability: \u2014'), findsOneWidget);
       expect(find.textContaining('Probability: 0%'), findsNothing);
+      expect(find.textContaining('100 coins per AI request'), findsOneWidget);
       await tester.enterText(
         find.byKey(const Key('slipiq-message')),
         'Change over 1.5 to under 1.5',
@@ -129,7 +130,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Generate code'));
+    await tester.tap(find.text('Generate code (200 coins)'));
     await tester.pumpAndSettle();
     expect(service.requests.single['confirm_booking'], true);
     expect(service.requests.single['booking_ticket_ids'], ['ticket-1']);
@@ -147,7 +148,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Generate code'));
+      await tester.tap(find.text('Generate code (200 coins)'));
       await tester.pumpAndSettle();
       expect(find.text('Retry same request'), findsOneWidget);
       await tester.tap(find.text('Retry same request'));

@@ -3,6 +3,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'services/slip_agent_service.dart';
+import 'services/session_manager.dart';
 
 class SlipAgentScreen extends StatefulWidget {
   final String? baseUrl;
@@ -173,13 +174,25 @@ class _SlipAgentScreenState extends State<SlipAgentScreen> {
       setState(() {
         _session = Map<String, dynamic>.from(result['session'] as Map);
         _confirmBooking = result['needs_booking_confirmation'] == true;
-        _warning = result['warning']?.toString();
+        final charge = result['coins_charged'];
+        final balance = result['coins_balance'];
+        _warning = [
+          if (charge is num && balance is num)
+            '$charge coins charged for this AI request. Balance: $balance coins.',
+          if (result['warning'] != null) result['warning'].toString(),
+        ].join(' ');
         _pending = null;
         _image = null;
         _message.clear();
         _sessions.removeWhere((s) => s['id'] == _session!['id']);
         _sessions.insert(0, _session!);
       });
+      final user = SessionManager.instance.currentUser;
+      if (user != null && result['coins_balance'] is num) {
+        await SessionManager.instance.updateUser(
+          user.copyWith(coins: (result['coins_balance'] as num).toInt()),
+        );
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scroll.hasClients) {
           _scroll.animateTo(
@@ -190,7 +203,14 @@ class _SlipAgentScreenState extends State<SlipAgentScreen> {
         }
       });
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          if (e is SlipAgentException && e.status == 402) {
+            _pending = null;
+          }
+        });
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -279,7 +299,7 @@ class _SlipAgentScreenState extends State<SlipAgentScreen> {
                           true,
                           [id],
                         ),
-                  child: const Text('Generate code'),
+                  child: const Text('Generate code (200 coins)'),
                 ),
             ],
           ),
@@ -506,7 +526,7 @@ class _SlipAgentScreenState extends State<SlipAgentScreen> {
               ),
               IconButton(
                 key: const Key('slipiq-send'),
-                tooltip: 'Send',
+                tooltip: 'Send (100 coins)',
                 onPressed: _busy || _loading || _pending != null
                     ? null
                     : () => _send(),
@@ -524,7 +544,8 @@ class _SlipAgentScreenState extends State<SlipAgentScreen> {
         const Padding(
           padding: EdgeInsets.only(bottom: 8),
           child: Text(
-            'Prematch quotes ? No bet is placed ? Missing data stays unavailable',
+            '100 coins per AI request, including edits and screenshots.\nBooking: 100 coins extra per new code. Admins are exempt.',
+            textAlign: TextAlign.center,
             style: TextStyle(fontSize: 11),
           ),
         ),

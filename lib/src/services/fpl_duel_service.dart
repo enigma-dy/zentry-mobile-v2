@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/fpl_duel_model.dart';
@@ -371,6 +372,39 @@ class FplDuelService {
     }
   }
 
+  String get _pendingWalletKey =>
+      'wallet_pending_reference_${SessionManager.instance.currentUser?.id ?? "signed_out"}';
+
+  Future<String?> pendingWalletReference() async =>
+      (await SharedPreferences.getInstance()).getString(_pendingWalletKey);
+
+  /// The backend checks ownership and the gateway; a checkout redirect is not proof of payment.
+  Future<Map<String, dynamic>> verifyWalletPayment(String reference) async {
+    final response = await _client
+        .post(
+          Uri.parse(
+            '$baseUrl/api/v1/billing/transactions/${Uri.encodeComponent(reference.trim())}/verify',
+          ),
+          headers: _headers,
+        )
+        .timeout(const Duration(seconds: 20));
+    final body = _safeJsonDecode(response.body);
+    if (response.statusCode != 200 || body is! Map || body['data'] is! Map) {
+      throw Exception(
+        (body is Map ? body['message'] : null) ??
+            'Could not verify payment. Please retry.',
+      );
+    }
+    final result = Map<String, dynamic>.from(body['data'] as Map);
+    if (result['status'] == 'paid') {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getString(_pendingWalletKey) == reference.trim()) {
+        await prefs.remove(_pendingWalletKey);
+      }
+    }
+    return result;
+  }
+
   /// Initialize real Paystack or NOWPayments checkout for wallet funding
   Future<Map<String, dynamic>> createWalletCheckout({
     required String provider,
@@ -393,7 +427,15 @@ class FplDuelService {
           .timeout(timeout);
       final body = _safeJsonDecode(res.body);
       if (res.statusCode == 200 && body is Map && body['data'] != null) {
-        return Map<String, dynamic>.from(body['data'] as Map);
+        final checkout = Map<String, dynamic>.from(body['data'] as Map);
+        final reference = checkout['reference'] as String?;
+        if (reference != null && reference.isNotEmpty) {
+          await (await SharedPreferences.getInstance()).setString(
+            _pendingWalletKey,
+            reference,
+          );
+        }
+        return checkout;
       }
       final msg =
           (body is Map ? body['message'] : null) ??
