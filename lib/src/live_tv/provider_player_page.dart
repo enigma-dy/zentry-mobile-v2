@@ -12,16 +12,63 @@ class ProviderPlayerPage extends StatefulWidget {
     super.key,
     required this.title,
     required this.source,
+    this.onSourceFailed,
+    this.serverControl,
+    this.manageOrientation = true,
   });
   final String title;
   final TvSource source;
+  final VoidCallback? onSourceFailed;
+  final Widget? serverControl;
+  final bool manageOrientation;
 
   @override
   State<ProviderPlayerPage> createState() => _ProviderPlayerPageState();
 }
 
 class _ProviderPlayerPageState extends State<ProviderPlayerPage>
-    with PlayerOrientation<ProviderPlayerPage> {
+    with WidgetsBindingObserver, PlayerOrientation<ProviderPlayerPage> {
+  @override
+  bool get managesPlayerOrientation => widget.manageOrientation;
+  bool _reportedFailure = false;
+  bool _background = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _background = true;
+      _timeout?.cancel();
+    } else if (state == AppLifecycleState.resumed) {
+      _background = false;
+      if (!_playing && !_failed) _armTimeout();
+    }
+  }
+
+  void _fail() {
+    if (!mounted || _background || _reportedFailure) return;
+    _reportedFailure = true;
+    _timeout?.cancel();
+    setState(() {
+      _loading = false;
+      _failed = true;
+      _playing = false;
+    });
+    widget.onSourceFailed?.call();
+  }
+
+  void _armTimeout() {
+    _timeout?.cancel();
+    _timeout = Timer(const Duration(seconds: 45), () {
+      if (!_playing) _fail();
+    });
+  }
+
   MethodChannel? _channel;
   Timer? _timeout;
   bool _loading = true;
@@ -30,42 +77,33 @@ class _ProviderPlayerPageState extends State<ProviderPlayerPage>
   int _generation = 0;
 
   void _created(int id) {
-    _channel = MethodChannel('provider_player/$id')
-      ..setMethodCallHandler((call) async {
-        if (!mounted) return;
-        if (call.method == 'ready' || call.method == 'playing') {
-          _timeout?.cancel();
-          setState(() {
-            _loading = false;
-            _failed = false;
-            if (call.method == 'playing') _playing = true;
-          });
-        } else if (call.method == 'error') {
-          _timeout?.cancel();
-          setState(() {
-            _loading = false;
-            _failed = true;
-            _playing = false;
-          });
-        }
-      });
-    _timeout = Timer(const Duration(seconds: 45), () {
-      if (mounted && _loading) {
+    final channel = MethodChannel('provider_player/$id');
+    _channel = channel;
+    channel.setMethodCallHandler((call) async {
+      if (!mounted || _channel != channel || _reportedFailure) return;
+      if (call.method == 'playing') {
+        _timeout?.cancel();
         setState(() {
           _loading = false;
-          _failed = true;
+          _failed = false;
+          _playing = true;
         });
+      } else if (call.method == 'ready') {
+        // A loaded document is not proof that the video has started.
+        setState(() => _loading = false);
+      } else if (call.method == 'error') {
+        _fail();
+      } else if (call.method == 'fullscreen') {
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
       }
     });
+    _armTimeout();
     unawaited(
-      _channel!.invokeMethod<void>('start').catchError((Object _) {
-        if (mounted) {
-          _timeout?.cancel();
-          setState(() {
-            _loading = false;
-            _failed = true;
-          });
-        }
+      channel.invokeMethod<void>('start').catchError((Object _) {
+        if (_channel == channel) _fail();
       }),
     );
   }
@@ -76,6 +114,7 @@ class _ProviderPlayerPageState extends State<ProviderPlayerPage>
     _channel = null;
     setState(() {
       _generation++;
+      _reportedFailure = false;
       _loading = true;
       _failed = false;
       _playing = false;
@@ -86,6 +125,7 @@ class _ProviderPlayerPageState extends State<ProviderPlayerPage>
   void dispose() {
     _timeout?.cancel();
     _channel?.setMethodCallHandler(null);
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
@@ -99,7 +139,10 @@ class _ProviderPlayerPageState extends State<ProviderPlayerPage>
           ? null
           : AppBar(
               title: Text(widget.title),
-              actions: [rotationButton(context)],
+              actions: [
+                if (widget.serverControl != null) widget.serverControl!,
+                rotationButton(context),
+              ],
             ),
       body: LayoutBuilder(
         builder: (context, constraints) {
@@ -177,8 +220,17 @@ class _ProviderPlayerPageState extends State<ProviderPlayerPage>
                   child: SafeArea(
                     child: Material(
                       color: Colors.black54,
-                      shape: const CircleBorder(),
-                      child: rotationButton(context),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (widget.serverControl != null)
+                            widget.serverControl!,
+                          rotationButton(context),
+                        ],
+                      ),
                     ),
                   ),
                 ),

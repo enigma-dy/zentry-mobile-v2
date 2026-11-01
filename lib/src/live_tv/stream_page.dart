@@ -5,6 +5,7 @@ import 'package:video_player/video_player.dart';
 
 import 'stream_resolver.dart';
 import 'playback_recovery.dart';
+import 'playback_health.dart';
 import 'player_orientation.dart';
 
 class StreamPage extends StatefulWidget {
@@ -14,11 +15,17 @@ class StreamPage extends StatefulWidget {
     this.displayTitle,
     this.sourceLabel,
     this.initialReferer,
+    this.onSourceFailed,
+    this.serverControl,
+    this.manageOrientation = true,
   });
   final String? initialUrl;
   final String? displayTitle;
   final String? sourceLabel;
   final String? initialReferer;
+  final VoidCallback? onSourceFailed;
+  final Widget? serverControl;
+  final bool manageOrientation;
 
   @override
   State<StreamPage> createState() => _StreamPageState();
@@ -26,6 +33,18 @@ class StreamPage extends StatefulWidget {
 
 class _StreamPageState extends State<StreamPage>
     with WidgetsBindingObserver, PlayerOrientation<StreamPage> {
+  @override
+  bool get managesPlayerOrientation => widget.manageOrientation;
+
+  final _health = PlaybackHealth();
+  bool _reportedFailure = false;
+  void _fail() {
+    if (!mounted || _resolutionCancelled || _reportedFailure) return;
+    _reportedFailure = true;
+    _wantsPlayback = false;
+    widget.onSourceFailed?.call();
+  }
+
   late final TextEditingController _input;
   VideoPlayerController? _player;
   bool _loading = false;
@@ -70,6 +89,24 @@ class _StreamPageState extends State<StreamPage>
     final player = _player;
     if (!mounted || _loading || _resolutionCancelled || player == null) return;
     final value = player.value;
+    final atEnd =
+        value.duration > Duration.zero &&
+        value.position >= value.duration &&
+        !value.isPlaying &&
+        !value.isBuffering &&
+        !value.hasError;
+    if (widget.onSourceFailed != null) {
+      if (_health.hasFailed(
+        position: value.position,
+        wantsPlayback: _wantsPlayback,
+        hasError: value.hasError,
+        atEnd: atEnd,
+        now: DateTime.now(),
+      )) {
+        _fail();
+      }
+      return;
+    }
     if (_recovery.shouldReconnect(
       position: value.position,
       wantsPlayback: _wantsPlayback,
@@ -93,6 +130,8 @@ class _StreamPageState extends State<StreamPage>
       _activeInput = _input.text;
     }
     _wantsPlayback = false;
+    _health.reset();
+    _reportedFailure = false;
     _resolutionCancelled = false;
     FocusScope.of(context).unfocus();
     setState(() {
@@ -107,7 +146,9 @@ class _StreamPageState extends State<StreamPage>
       parsePageUrl(_activeInput!);
       started = true;
       await _player?.pause();
+      if (!mounted || _resolutionCancelled) return;
       await cancelStreamDetection().catchError((Object _) {});
+      if (!mounted || _resolutionCancelled) return;
       final stream = await resolvePage(
         _activeInput!,
         shouldContinue: () => mounted && !_resolutionCancelled,
@@ -146,10 +187,13 @@ class _StreamPageState extends State<StreamPage>
         (_) => _checkPlayback(),
       );
     } catch (error) {
-      if (started) await cancelStreamDetection().catchError((Object _) {});
+      if (started && mounted && !_resolutionCancelled) {
+        await cancelStreamDetection().catchError((Object _) {});
+      }
       retryInitialization =
           mounted &&
           !_resolutionCancelled &&
+          widget.onSourceFailed == null &&
           pending != null &&
           _recovery.shouldReconnect(
             position: Duration.zero,
@@ -168,6 +212,7 @@ class _StreamPageState extends State<StreamPage>
       await pending?.dispose();
       if (mounted) setState(() => _loading = false);
     }
+    if (_error != null && widget.onSourceFailed != null) _fail();
     if (retryInitialization && mounted && !_resolutionCancelled) {
       await _play(reconnecting: true);
     }
@@ -218,8 +263,16 @@ class _StreamPageState extends State<StreamPage>
               child: SafeArea(
                 child: Material(
                   color: Colors.black54,
-                  shape: const CircleBorder(),
-                  child: rotationButton(context),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (widget.serverControl != null) widget.serverControl!,
+                      rotationButton(context),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -258,7 +311,10 @@ class _StreamPageState extends State<StreamPage>
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.displayTitle ?? 'Open a link'),
-        actions: [rotationButton(context)],
+        actions: [
+          if (widget.serverControl != null) widget.serverControl!,
+          rotationButton(context),
+        ],
       ),
       body: Center(
         child: ConstrainedBox(
@@ -326,7 +382,9 @@ class _StreamPageState extends State<StreamPage>
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: SelectableText(
-                    widget.initialUrl == null ? _error! : 'This stream couldn’t start. Retry playback or go back and choose another server.',
+                    widget.initialUrl == null
+                        ? _error!
+                        : 'This stream couldn’t start. Retry playback or go back and choose another server.',
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.error,
                     ),

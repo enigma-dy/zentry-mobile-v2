@@ -3,11 +3,9 @@ package com.zentry.predict
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
-import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.net.Uri
 import android.view.View
-import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -57,10 +55,6 @@ private class ProviderPlayerView(
     private var disposed = false
     private var started = false
     private var documentFailed = false
-    private var fullscreen: View? = null
-    private var previousOrientation: Int? = null
-    private var previousSystemUi: Int? = null
-    private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
     private val playbackScript = activity.assets.open("provider_player.js").bufferedReader().use { it.readText() }
 
     init {
@@ -84,24 +78,21 @@ private class ProviderPlayerView(
                     if (!disposed) channel.invokeMethod("playing", null)
                     return true
                 }
+                if (message.message() == "__PROVIDER_PLAYER_ERROR__") {
+                    if (!disposed) channel.invokeMethod("error", null)
+                    return true
+                }
                 return false
             }
 
             override fun onCreateWindow(view: WebView?, dialog: Boolean, gesture: Boolean, message: android.os.Message?) = false
 
             override fun onShowCustomView(view: View, callback: WebChromeClient.CustomViewCallback) {
-                if (fullscreen != null) { callback.onCustomViewHidden(); return }
-                fullscreen = view
-                previousOrientation = activity.requestedOrientation
-                previousSystemUi = activity.window.decorView.systemUiVisibility
-                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                activity.window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or
-                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                fullscreenCallback = callback
-                (activity.window.decorView as ViewGroup).addView(view, ViewGroup.LayoutParams(-1, -1))
+                // Keep Flutter's server selector visible in fullscreen.
+                callback.onCustomViewHidden()
+                if (!disposed) channel.invokeMethod("fullscreen", null)
             }
 
-            override fun onHideCustomView() = hideFullscreen()
         }
         webView.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
@@ -165,22 +156,8 @@ private class ProviderPlayerView(
         }
     }
 
-    private fun hideFullscreen() {
-        if (fullscreen == null) return
-        previousOrientation?.let { activity.requestedOrientation = it }
-        previousSystemUi?.let { activity.window.decorView.systemUiVisibility = it }
-        previousOrientation = null
-        previousSystemUi = null
-        fullscreen?.let { (it.parent as? ViewGroup)?.removeView(it) }
-        fullscreen = null
-        val callback = fullscreenCallback
-        fullscreenCallback = null
-        callback?.onCustomViewHidden()
-    }
-
     fun pause() {
         if (disposed) return
-        hideFullscreen()
         webView.evaluateJavascript("window.postMessage({providerPlayerPause:true}, '*');", null)
         webView.onPause()
     }

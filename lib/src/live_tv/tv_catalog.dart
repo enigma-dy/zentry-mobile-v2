@@ -76,7 +76,7 @@ List<TvListing> parseTvCatalog(Map<String, dynamic> data, Uri origin) {
             TvSource(
               source['name']?.toString() ?? 'Server ${sources.length + 1}',
               url,
-              referer: origin,
+              referer: _webUrl(source['referer'], origin) ?? origin,
             ),
           );
         }

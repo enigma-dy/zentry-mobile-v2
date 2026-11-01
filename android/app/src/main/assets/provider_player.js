@@ -10,6 +10,39 @@
   let playPending = false;
   const deadline = Date.now() + 40000;
   let startupTimer;
+  let failed = false;
+  let lastMedia = null;
+  let lastPosition = null;
+  let stalledSince = null;
+  function mainVideo(media) {
+    return media && typeof media.matches === 'function' && media.matches('video') &&
+      !media.closest('#adContainer,#adOverlay,.ad-overlay,.ad-container');
+  }
+  function reportFailure() {
+    if (failed || backgroundPaused || document.hidden) return;
+    failed = true;
+    console.info('__PROVIDER_PLAYER_ERROR__');
+  }
+  document.addEventListener('error', event => {
+    if (mainVideo(event.target)) reportFailure();
+  }, true);
+  setInterval(() => {
+    const media = document.getElementById('video') || document.querySelector('video');
+    if (!mainVideo(media) || !hasPlayed || failed || backgroundPaused ||
+        document.hidden || media.paused || media.ended) {
+      lastPosition = null;
+      stalledSince = null;
+      return;
+    }
+    if (media.error) { reportFailure(); return; }
+    if (media !== lastMedia || media.currentTime !== lastPosition) {
+      lastMedia = media;
+      lastPosition = media.currentTime;
+      stalledSince = Date.now();
+      return;
+    }
+    if (stalledSince !== null && Date.now() - stalledSince >= 20000) reportFailure();
+  }, 5000);
   const noop = () => {};
 
   function cleanAds() {
@@ -66,6 +99,9 @@
     // An ad must never satisfy the main video's startup event.
     if (!event.target.matches('video') || event.target.closest('#adContainer,#adOverlay,.ad-overlay,.ad-container')) return;
     hasPlayed = true;
+    backgroundPaused = false;
+    stalledSince = null;
+    lastPosition = null;
     clearInterval(startupTimer);
     cleanAds();
     console.info('__PROVIDER_PLAYER_PLAYING__');

@@ -8,8 +8,7 @@ import '../ads/watch_ad_gate.dart';
 import '../services/sports_service.dart';
 import 'catalog_page.dart';
 import 'tv_catalog.dart';
-import 'provider_player_page.dart';
-import 'stream_page.dart';
+import 'watch_page.dart';
 
 class LiveTvScreen extends StatefulWidget {
   const LiveTvScreen({super.key, required this.service});
@@ -46,14 +45,8 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
           if (!mounted) return;
           await Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder: (_) => source.needsProviderPlayer
-                  ? ProviderPlayerPage(title: listing.name, source: source)
-                  : StreamPage(
-                      initialUrl: source.url.toString(),
-                      displayTitle: listing.name,
-                      sourceLabel: source.name,
-                      initialReferer: source.referer?.toString(),
-                    ),
+              builder: (_) =>
+                  WatchPage(listing: listing, initialSource: source),
             ),
           );
         },

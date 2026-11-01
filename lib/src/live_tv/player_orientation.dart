@@ -6,10 +6,12 @@ import 'package:flutter/services.dart';
 /// Keeps rotation available in both the native and provider players.
 mixin PlayerOrientation<T extends StatefulWidget> on State<T> {
   Orientation? _orientation;
+  bool get managesPlayerOrientation => true;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (!managesPlayerOrientation) return;
     final orientation = MediaQuery.orientationOf(context);
     if (_orientation == orientation) return;
     _orientation = orientation;
@@ -43,8 +45,10 @@ mixin PlayerOrientation<T extends StatefulWidget> on State<T> {
 
   @override
   void dispose() {
-    unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
-    unawaited(SystemChrome.setPreferredOrientations([]));
+    if (managesPlayerOrientation) {
+      unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
+      unawaited(SystemChrome.setPreferredOrientations([]));
+    }
     super.dispose();
   }
 }

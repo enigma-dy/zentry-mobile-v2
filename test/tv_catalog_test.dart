@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:predict/src/live_tv/tv_catalog.dart';
 
 void main() {
+  _providerRefererTests();
   final origin = Uri.parse('https://www.90minutes.pro/');
 
   test('uses the provider renderer for 90minutes embeds and HLS pages', () {
@@ -116,4 +117,44 @@ void main() {
       expect(listings.every((listing) => !listing.canWatch), isTrue);
     },
   );
+}
+
+void _providerRefererTests() {
+  test('uses a source-specific Referer for additional TV providers', () {
+    final origin = Uri.parse('https://www.90minutes.pro/');
+    final listings = parseTvCatalog({
+      'success': true,
+      'streams': [
+        {
+          'streams': [
+            {
+              'id': 'laczek:match',
+              'name': 'Home vs Away',
+              'status': 'live',
+              'sources': [
+                {'name': 'Main', 'embed': '/embed/main'},
+                {
+                  'name': 'Laczek',
+                  'embed':
+                      'https://laczekstream.lovable.app/api/public/fctv-hls?slot=1:42',
+                  'referer': 'https://laczekstream.lovable.app/',
+                },
+                {
+                  'name': 'Invalid referer',
+                  'embed': 'https://player.example/embed',
+                  'referer': 'javascript:invalid',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }, origin);
+    expect(listings.single.sources[0].referer, origin);
+    expect(
+      listings.single.sources[1].referer,
+      Uri.parse('https://laczekstream.lovable.app/'),
+    );
+    expect(listings.single.sources[2].referer, origin);
+  });
 }
