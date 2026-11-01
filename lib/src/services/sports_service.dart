@@ -889,6 +889,17 @@ class SportsService {
         : <String, dynamic>{'items': [], 'tags': [], 'total': 0};
   }
 
+  Future<Map<String, dynamic>> getTvCatalog() async {
+    final response = await _client
+        .get(Uri.parse('$baseUrl/live-tv/catalog'), headers: _headers)
+        .timeout(const Duration(seconds: 25));
+    final data = _parseResponse(response);
+    if (data['success'] != true || data['streams'] is! List) {
+      throw SportsException('The TV guide is temporarily unavailable');
+    }
+    return data;
+  }
+
   /// Original BetMachine contract ported from the legacy backend.
   Future<Map<String, dynamic>> getBetMachine({
     int totalOdds = 300,

@@ -45,6 +45,8 @@ dependencies:
   better_player_plus: ^1.2.1
   flutter_inappwebview: ^6.1.5
   video_player: ^2.11.1
+  ytdlp_flutter: ^0.1.0
+  google_mobile_ads: ^9.2.0
   google_sign_in: ^7.2.0
   firebase_core: ^4.15.0
   firebase_messaging: ^16.7.0

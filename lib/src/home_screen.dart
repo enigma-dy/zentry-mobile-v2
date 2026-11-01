@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'auth_screen.dart';
+import 'ads/ad_slot.dart';
+import 'live_tv/live_tv_screen.dart';
 import 'brand.dart';
 import 'slip_agent_screen.dart';
 import 'profile_screen.dart';
@@ -2378,6 +2380,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     // Main Dynamic Tab Content
                     Expanded(child: _buildBodyContent(constraints)),
+                    if ({0, 1, 4, 9}.contains(_topTabNavIndex))
+                      AdSlot(
+                        key: ValueKey('page-ad-$_topTabNavIndex'),
+                        placement: {4, 9}.contains(_topTabNavIndex)
+                            ? AdPlacement.prediction
+                            : _topTabNavIndex == 1 ? AdPlacement.match : AdPlacement.home,
+                      ),
                   ],
                 ),
 
@@ -2413,6 +2422,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: SafeArea(
         child: Column(
           children: [
+            const AdPrivacyButton(),
             // Drawer Header
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 12, 4),
@@ -3438,7 +3448,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case 5:
         return _buildFeedsScreen(constraints);
       case 6:
-        return _buildLiveTvScreen(constraints);
+        return LiveTvScreen(service: _sportsService);
       case 7:
         return SlipAgentScreen(baseUrl: _sportsService.baseUrl);
       case 8:

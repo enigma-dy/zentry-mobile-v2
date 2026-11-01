@@ -4,12 +4,16 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <application
         android:label="predict"
+        android:extractNativeLibs="true"
         android:name="${applicationName}"
         android:icon="@drawable/zentry_logo"
         android:networkSecurityConfig="@xml/network_security_config">
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="zentry_notifications" />
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'ads/ad_slot.dart';
 import 'models/fixture_model.dart';
 import 'models/home_markets.dart';
 import 'services/sports_service.dart';
@@ -174,6 +175,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
     final fx = _enrichedDetail?.fixture ?? widget.initialFixture;
 
     return Scaffold(
+      bottomNavigationBar: const AdSlot(placement: AdPlacement.match),
       backgroundColor: bgColor,
       appBar: AppBar(
         backgroundColor: cardColor,
@@ -437,9 +439,8 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
                   children: [
                     CircleAvatar(
                       radius: 26,
-                      backgroundColor: const Color(
-                        0xFF00E676,
-                      ).withValues(alpha: 0.2),
+                      backgroundColor: const Color(0xFF00E676)
+                          .withValues(alpha: 0.2),
                       child: Text(
                         fx.homeTeam.isNotEmpty ? fx.homeTeam[0] : 'H',
                         style: const TextStyle(
@@ -504,9 +505,8 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
                   children: [
                     CircleAvatar(
                       radius: 26,
-                      backgroundColor: const Color(
-                        0xFF00B0FF,
-                      ).withValues(alpha: 0.2),
+                      backgroundColor: const Color(0xFF00B0FF)
+                          .withValues(alpha: 0.2),
                       child: Text(
                         fx.awayTeam.isNotEmpty ? fx.awayTeam[0] : 'A',
                         style: const TextStyle(
@@ -1680,9 +1680,8 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
                                 vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: const Color(
-                                  0xFF00E676,
-                                ).withValues(alpha: 0.2),
+                                color: const Color(0xFF00E676)
+                                    .withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
