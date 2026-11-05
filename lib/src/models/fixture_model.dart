@@ -686,6 +686,30 @@ class FixtureModel {
     updatedAt: updatedAt,
   );
 
+  /// A prediction ID belongs to its provider; only fixture_id is an API UUID.
+  factory FixtureModel.fromPredictionFeed(Map<String, dynamic> item) {
+    final matchStatus = _string(item['match_status']).trim().toLowerCase();
+    final pickStatus = _string(item['status']).trim().toLowerCase();
+    final status = matchStatus.isNotEmpty
+        ? matchStatus
+        : const {'pending', 'upcoming', 'prematch', ''}.contains(pickStatus)
+        ? 'prematch'
+        : 'unknown';
+    final sporty = _map(_map(item['bookmakers'])['sporty']);
+    final event = _string(item['sporty_event_id']).trim();
+    return FixtureModel.fromJson({
+      ...item,
+      'id': _string(item['fixture_id']).trim(),
+      'league_name': item['league_name'] ?? item['league'],
+      'status': status,
+      'sporty_event_id': event.isNotEmpty ? event : sporty['event_id'],
+      if (item['sporty_markets'] is List)
+        'markets': {'sporty': item['sporty_markets']},
+      'prediction': item,
+      'predictions': [item],
+    });
+  }
+
   factory FixtureModel.fromJson(Map<String, dynamic> json) {
     final mappings = json['provider_mappings'] is List
         ? (json['provider_mappings'] as List)

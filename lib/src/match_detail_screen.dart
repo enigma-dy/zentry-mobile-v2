@@ -46,6 +46,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
   EnrichedFixtureDetailModel? _enrichedDetail;
   FixtureStreamsModel? _fixtureStreams;
   Timer? _bettingCloseTimer;
+  int _detailRequestVersion = 0;
 
   @override
   void initState() {
@@ -139,7 +140,15 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
     return '$w, $d $m $y $hh:$mm';
   }
 
-  Future<void> _loadFixtureDetail() async {
+  Future<void> _loadFixtureDetail({bool refresh = false}) async {
+    final version = ++_detailRequestVersion;
+    if (widget.fixtureId.trim().isEmpty) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Additional match details are still syncing.';
+      });
+      return;
+    }
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -148,37 +157,41 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
     try {
       final detail = await _sportsService.getFixtureDetail(
         widget.fixtureId,
-        includeStreams: true,
-        refresh: true,
+        includeStreams: false,
+        refresh: refresh,
         timeout: const Duration(seconds: 20),
       );
-      FixtureStreamsModel? streams = detail.streams;
-      if (streams == null || !streams.hasStreams) {
-        try {
-          streams = await _sportsService.getFixtureStreams(
-            widget.fixtureId,
-            timeout: const Duration(seconds: 3),
-          );
-        } catch (_) {}
-      }
-      if (mounted) {
+      if (mounted && version == _detailRequestVersion) {
         _scheduleBettingClose(detail.fixture);
         setState(() {
-          _enrichedDetail = streams != null && streams.hasStreams
-              ? detail.copyWithStreams(streams)
-              : detail;
-          _fixtureStreams = streams;
+          _enrichedDetail = detail;
+          _fixtureStreams = detail.streams;
           _isLoading = false;
         });
+        if (detail.streams?.hasStreams != true) {
+          unawaited(_loadFixtureStreams(version));
+        }
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && version == _detailRequestVersion) {
         setState(() {
           _errorMessage = e.toString();
           _isLoading = false;
         });
       }
     }
+  }
+
+  Future<void> _loadFixtureStreams(int version) async {
+    try {
+      final streams = await _sportsService.getFixtureStreams(
+        widget.fixtureId,
+        timeout: const Duration(seconds: 3),
+      );
+      if (mounted && version == _detailRequestVersion && streams.hasStreams) {
+        setState(() => _fixtureStreams = streams);
+      }
+    } catch (_) {}
   }
 
   @override
@@ -230,12 +243,14 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
         actions: [
           IconButton(
             icon: Icon(Icons.refresh, color: textColor),
-            onPressed: _loadFixtureDetail,
+            onPressed: _isLoading || widget.fixtureId.trim().isEmpty
+                ? null
+                : () => _loadFixtureDetail(refresh: true),
             tooltip: 'Refresh Match Data',
           ),
         ],
       ),
-      body: _isLoading
+      body: _isLoading && fx == null
           ? const Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -302,6 +317,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
             )
           : Column(
               children: [
+                if (_isLoading) const LinearProgressIndicator(),
                 if (_errorMessage != null)
                   Container(
                     width: double.infinity,

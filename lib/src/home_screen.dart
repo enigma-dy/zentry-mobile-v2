@@ -8493,7 +8493,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildScores24PopularCard(Map<String, dynamic> item, int idx) {
     final ticketSelection = TicketSelectionModel.fromPrediction(item);
     final id = ticketSelection.uniqueKey;
-    final fixtureId = item['fixture_id']?.toString().trim() ?? '';
+    final initialFixture = FixtureModel.fromPredictionFeed(item);
     final sport = item['sport']?.toString() ?? '';
     final homeTeam = item['home_team']?.toString() ?? '';
     final awayTeam = item['away_team']?.toString() ?? '';
@@ -8511,21 +8511,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return InkWell(
       onTap: () {
-        if (fixtureId.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Match details are still syncing. Try again shortly.',
-              ),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-          return;
-        }
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => MatchDetailScreen(
-              fixtureId: fixtureId,
+              fixtureId: initialFixture.id,
+              initialFixture: initialFixture,
               sportsService: _sportsService,
               onToggleOdd: _toggleDetailOddSelection,
               isOddSelected: _isDetailOddSelected,

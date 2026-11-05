@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:predict/src/home_screen.dart';
+import 'package:predict/src/match_detail_screen.dart';
 import 'package:predict/src/models/user_model.dart';
 import 'package:predict/src/services/session_manager.dart';
 import 'package:predict/src/services/sports_service.dart';
@@ -55,6 +56,12 @@ void main() {
         requests.add(request.url);
         dynamic data = <String, dynamic>{};
         final path = request.url.path;
+        if (path == '/api/v1/fixtures/9de626ac-15dd-40ab-9a72-eaa8a8d38dfb') {
+          return http.Response(
+            jsonEncode({'error': 'Fixture temporarily unavailable'}),
+            503,
+          );
+        }
         if (path.endsWith('/sports')) {
           data = [
             {'id': 1, 'name': 'Football', 'key': 'football'},
@@ -165,6 +172,17 @@ void main() {
       await tester.tap(predictions);
       await tester.pumpAndSettle();
       expect(find.textContaining('Popular1-0'), findsOneWidget);
+      await tester.tap(find.textContaining('Popular1-0'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MatchDetailScreen), findsOneWidget);
+      expect(find.text('Popular1-0'), findsOneWidget);
+      expect(find.text('Failed to load match details'), findsNothing);
+      final detailRequest = requests.lastWhere(
+        (uri) => uri.path.endsWith('/9de626ac-15dd-40ab-9a72-eaa8a8d38dfb'),
+      );
+      expect(detailRequest.queryParameters['refresh'], isNull);
+      await tester.tap(find.byIcon(Icons.arrow_back));
+      await tester.pumpAndSettle();
       expect(find.textContaining('Page 1 of'), findsNothing);
       await tester.drag(
         find.byType(SingleChildScrollView).last,
