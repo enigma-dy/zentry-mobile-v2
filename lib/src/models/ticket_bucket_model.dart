@@ -1,4 +1,21 @@
+import 'betting_availability.dart';
+
+String ticketOddsLabel(double odds) =>
+    odds.isFinite && odds > 1 ? odds.toStringAsFixed(2) : '\u2014';
+
+double ticketSelectionsTotalOdds(Iterable<TicketSelectionModel> selections) {
+  if (selections.isEmpty || selections.any((selection) => !selection.hasOdds)) {
+    return 0;
+  }
+  final total = selections.fold(
+    1.0,
+    (total, selection) => total * selection.odds,
+  );
+  return total.isFinite ? total : 0;
+}
+
 class TicketSelectionModel {
+  final Map<String, dynamic> bookmakers;
   final String? fixtureId;
   final String? predictionId;
   final int? sportId;
@@ -15,11 +32,13 @@ class TicketSelectionModel {
   final double odds;
   final int confidence;
   final String status; // "pending", "won", "lost", "void"
+  final String matchStatus;
   final String? settledAt;
 
   String get prediction => selection;
 
   const TicketSelectionModel({
+    this.bookmakers = const {},
     this.fixtureId,
     this.predictionId,
     this.sportId,
@@ -37,13 +56,94 @@ class TicketSelectionModel {
     required this.odds,
     this.confidence = 0,
     this.status = 'pending',
+    this.matchStatus = '',
     this.settledAt,
   }) : selection = selection != '' ? selection : (prediction ?? '');
 
-  String get uniqueKey => '${fixtureId ?? homeTeam}_${marketType}_$selection';
+  /// One mapping for normal, ZAI, VIP and grouped prediction cards.
+  factory TicketSelectionModel.fromPrediction(Map<String, dynamic> item) {
+    final books = item['bookmakers'] is Map
+        ? Map<String, dynamic>.from(item['bookmakers'])
+        : <String, dynamic>{};
+    final sporty = books['sporty'] is Map
+        ? Map<String, dynamic>.from(books['sporty'])
+        : <String, dynamic>{};
+    String code(String flat, String nested) {
+      final value = item[flat]?.toString().trim() ?? '';
+      return value.isNotEmpty ? value : sporty[nested]?.toString().trim() ?? '';
+    }
+
+    final market = code('sporty_market_id', 'market_id');
+    final outcome = code('sporty_outcome_id', 'outcome_id');
+    final price = double.tryParse(sporty['odds']?.toString() ?? '');
+    final sourcePrice = double.tryParse(item['odds']?.toString() ?? '') ?? 0;
+    return TicketSelectionModel(
+      bookmakers: books,
+      fixtureId: item['fixture_id']?.toString(),
+      predictionId: item['id']?.toString(),
+      sportId: int.tryParse(item['sport_id']?.toString() ?? ''),
+      sportyEventId: code('sporty_event_id', 'event_id'),
+      sportyMarketId: market,
+      sportyOutcomeId: outcome,
+      sportySpecifier: code('sporty_specifier', 'specifier'),
+      homeTeam: item['home_team']?.toString() ?? '',
+      awayTeam: item['away_team']?.toString() ?? '',
+      leagueName: (item['league'] ?? item['league_name'])?.toString() ?? '',
+      matchTime: item['match_time']?.toString() ?? '',
+      marketType: item['market']?.toString() ?? '',
+      selection: item['selection']?.toString() ?? '',
+      odds:
+          market.isNotEmpty &&
+              outcome.isNotEmpty &&
+              price != null &&
+              price.isFinite &&
+              price > 1
+          ? price
+          : sourcePrice,
+      confidence: (num.tryParse(item['confidence']?.toString() ?? '') ?? 0)
+          .round(),
+      status: item['status']?.toString() ?? 'pending',
+      matchStatus: item['match_status']?.toString() ?? '',
+    );
+  }
+
+  bool get isUpcoming => isUpcomingBettingFixture(
+    matchTime,
+    status: status,
+    matchStatus: matchStatus,
+  );
+
+  bool get hasOdds => odds.isFinite && odds > 1;
+
+  bool get hasSportySelection =>
+      sportyEventId?.isNotEmpty == true &&
+      sportyMarketId?.isNotEmpty == true &&
+      sportyOutcomeId?.isNotEmpty == true;
+
+  bool get canAddToBucket =>
+      isUpcoming &&
+      (fixtureId?.isNotEmpty == true || hasSportySelection) &&
+      (sportId ?? 0) > 0 &&
+      homeTeam.isNotEmpty &&
+      awayTeam.isNotEmpty &&
+      DateTime.tryParse(matchTime) != null &&
+      marketType.isNotEmpty &&
+      selection.isNotEmpty &&
+      odds.isFinite &&
+      (hasOdds || odds == 0 && hasSportySelection);
+
+  String get uniqueKey =>
+      (sportyEventId?.isNotEmpty == true &&
+          sportyMarketId?.isNotEmpty == true &&
+          sportyOutcomeId?.isNotEmpty == true)
+      ? '${sportyEventId}_${sportyMarketId}_${sportyOutcomeId}_${sportySpecifier ?? ''}'
+      : '${fixtureId ?? homeTeam}_${marketType}_$selection';
 
   factory TicketSelectionModel.fromJson(Map<String, dynamic> json) {
     return TicketSelectionModel(
+      bookmakers: json['bookmakers'] is Map
+          ? Map<String, dynamic>.from(json['bookmakers'])
+          : const {},
       fixtureId: json['fixture_id']?.toString(),
       predictionId: json['prediction_id']?.toString(),
       sportId: int.tryParse(json['sport_id']?.toString() ?? ''),
@@ -67,11 +167,13 @@ class TicketSelectionModel {
           ? json['confidence'] as int
           : int.tryParse(json['confidence']?.toString() ?? '0') ?? 0,
       status: json['status']?.toString() ?? 'pending',
+      matchStatus: json['match_status']?.toString() ?? '',
       settledAt: json['settled_at']?.toString(),
     );
   }
 
   Map<String, dynamic> toJson() => {
+    if (bookmakers.isNotEmpty) 'bookmakers': bookmakers,
     if (fixtureId != null) 'fixture_id': fixtureId,
     if (predictionId != null) 'prediction_id': predictionId,
     if (sportId != null) 'sport_id': sportId,
@@ -91,6 +193,7 @@ class TicketSelectionModel {
     'odds': odds,
     'confidence': confidence,
     'status': status,
+    if (matchStatus.isNotEmpty) 'match_status': matchStatus,
     if (settledAt != null) 'settled_at': settledAt,
   };
 }
@@ -123,7 +226,7 @@ class BookingCodeResult {
       shareUrl: json['share_url']?.toString() ?? '',
       totalOdds: json['total_odds'] is num
           ? (json['total_odds'] as num).toDouble()
-          : double.tryParse(json['total_odds']?.toString() ?? '1.0') ?? 1.0,
+          : double.tryParse(json['total_odds']?.toString() ?? '') ?? 0,
       itemCount: json['item_count'] is int
           ? json['item_count'] as int
           : int.tryParse(json['item_count']?.toString() ?? '0') ?? 0,
@@ -177,7 +280,7 @@ class TicketBucketModel {
       shareUrl: json['share_url']?.toString() ?? '',
       totalOdds: json['total_odds'] is num
           ? (json['total_odds'] as num).toDouble()
-          : double.tryParse(json['total_odds']?.toString() ?? '1.0') ?? 1.0,
+          : double.tryParse(json['total_odds']?.toString() ?? '') ?? 0,
       itemCount: json['item_count'] is int
           ? json['item_count'] as int
           : items.length,

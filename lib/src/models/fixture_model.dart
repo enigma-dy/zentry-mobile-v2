@@ -309,6 +309,11 @@ class PredictionModel {
   String get selection => prediction;
   bool get hasApprovedPredictionPrice {
     if (oddsPhase == 'unavailable' || oddsSource == 'unavailable') return false;
+    if (oddsPhase == 'source') {
+      return provider.isNotEmpty &&
+          oddsSource == provider &&
+          _validOdds(predictionOdds).isNotEmpty;
+    }
     if (provider.isEmpty && oddsSource.isEmpty && oddsPhase.isEmpty)
       return true;
     return oddsPhase == 'prematch' &&
@@ -320,7 +325,8 @@ class PredictionModel {
 
   String get effectiveOdds {
     if (!hasApprovedPredictionPrice) return '';
-    if ((oddsSource == 'sporty' ||
+    if ((oddsPhase == 'source' ||
+            oddsSource == 'sporty' ||
             oddsSource == 'betmines' ||
             (sportyMarketId.isNotEmpty && sportyOutcomeId.isNotEmpty)) &&
         _validOdds(predictionOdds).isNotEmpty)

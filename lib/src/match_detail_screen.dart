@@ -1,28 +1,32 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'ads/ad_slot.dart';
 import 'models/fixture_model.dart';
 import 'models/home_markets.dart';
+import 'models/betting_availability.dart';
 import 'services/sports_service.dart';
 import 'live_stream_sheet.dart';
 
 class MatchDetailScreen extends StatefulWidget {
   final String fixtureId;
   final FixtureModel? initialFixture;
+  final SportsService? sportsService;
   final Function(
-    String fixtureId,
+    FixtureModel fixture,
     String marketKey,
     String selection,
     double odds,
   )?
   onToggleOdd;
-  final bool Function(String fixtureId, String marketKey, String selection)?
+  final bool Function(FixtureModel fixture, String marketKey, String selection)?
   isOddSelected;
 
   const MatchDetailScreen({
     super.key,
     required this.fixtureId,
     this.initialFixture,
+    this.sportsService,
     this.onToggleOdd,
     this.isOddSelected,
   });
@@ -34,22 +38,37 @@ class MatchDetailScreen extends StatefulWidget {
 class _MatchDetailScreenState extends State<MatchDetailScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final SportsService _sportsService = SportsService();
+  late final SportsService _sportsService =
+      widget.sportsService ?? SportsService();
 
   bool _isLoading = true;
   String? _errorMessage;
   EnrichedFixtureDetailModel? _enrichedDetail;
   FixtureStreamsModel? _fixtureStreams;
+  Timer? _bettingCloseTimer;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+    _scheduleBettingClose(widget.initialFixture);
     _loadFixtureDetail();
+  }
+
+  void _scheduleBettingClose(FixtureModel? fixture) {
+    _bettingCloseTimer?.cancel();
+    if (fixture == null) return;
+    final remaining = fixture.matchTime.difference(DateTime.now());
+    if (remaining > Duration.zero) {
+      _bettingCloseTimer = Timer(remaining, () {
+        if (mounted) setState(() {});
+      });
+    }
   }
 
   @override
   void dispose() {
+    _bettingCloseTimer?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -143,6 +162,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
         } catch (_) {}
       }
       if (mounted) {
+        _scheduleBettingClose(detail.fixture);
         setState(() {
           _enrichedDetail = streams != null && streams.hasStreams
               ? detail.copyWithStreams(streams)
@@ -439,8 +459,9 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
                   children: [
                     CircleAvatar(
                       radius: 26,
-                      backgroundColor: const Color(0xFF00E676)
-                          .withValues(alpha: 0.2),
+                      backgroundColor: const Color(
+                        0xFF00E676,
+                      ).withValues(alpha: 0.2),
                       child: Text(
                         fx.homeTeam.isNotEmpty ? fx.homeTeam[0] : 'H',
                         style: const TextStyle(
@@ -505,8 +526,9 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
                   children: [
                     CircleAvatar(
                       radius: 26,
-                      backgroundColor: const Color(0xFF00B0FF)
-                          .withValues(alpha: 0.2),
+                      backgroundColor: const Color(
+                        0xFF00B0FF,
+                      ).withValues(alpha: 0.2),
                       child: Text(
                         fx.awayTeam.isNotEmpty ? fx.awayTeam[0] : 'A',
                         style: const TextStyle(
@@ -786,7 +808,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
                 final pred = fx.prediction!;
                 final isPredSelected =
                     widget.isOddSelected?.call(
-                      widget.fixtureId,
+                      fx,
                       'PREDICTION',
                       pred.prediction,
                     ) ??
@@ -808,12 +830,17 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
                 );
 
                 return InkWell(
-                  onTap: predOdds == null
+                  onTap:
+                      predOdds == null ||
+                          !isUpcomingBettingFixture(
+                            fx.matchTime.toIso8601String(),
+                            status: fx.status,
+                          )
                       ? null
                       : () {
                           if (widget.onToggleOdd != null) {
                             widget.onToggleOdd!(
-                              widget.fixtureId,
+                              fx,
                               'PREDICTION',
                               pred.prediction,
                               predOdds,
@@ -854,14 +881,18 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
                             children: [
                               Row(
                                 children: [
-                                  Text(
-                                    'Prediction: ${pred.prediction}',
-                                    style: TextStyle(
-                                      color: isPredSelected
-                                          ? const Color(0xFFFFD700)
-                                          : textColor,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w800,
+                                  Expanded(
+                                    child: Text(
+                                      'Prediction: ${pred.prediction}',
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: isPredSelected
+                                            ? const Color(0xFFFFD700)
+                                            : textColor,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w800,
+                                      ),
                                     ),
                                   ),
                                   if (isPredSelected) ...[
@@ -887,11 +918,27 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
                                   ],
                                 ],
                               ),
+                              Text(
+                                !isUpcomingBettingFixture(
+                                      fx.matchTime.toIso8601String(),
+                                      status: fx.status,
+                                    )
+                                    ? 'Betting closed'
+                                    : predOdds == null
+                                    ? 'This selection is unavailable from the bookmaker'
+                                    : widget.onToggleOdd == null
+                                    ? 'Selection unavailable'
+                                    : 'Tap to ${isPredSelected ? "remove from" : "add to"} ticket bucket',
+                                style: TextStyle(
+                                  color: mutedTextColor,
+                                  fontSize: 11,
+                                ),
+                              ),
                               if (predProbability != null)
                                 Text(
                                   predReview != null
                                       ? 'Estimate under review: model $predProbability%; odds imply ${predReview.rawImpliedProbability.toStringAsFixed(1)}% (before margin adjustment).'
-                                      : '$predProbability% probability • Tap to ${isPredSelected ? "remove from" : "add to"} ticket bucket',
+                                      : '$predProbability% probability',
                                   style: TextStyle(
                                     color: mutedTextColor,
                                     fontSize: 11,
@@ -900,30 +947,29 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
                             ],
                           ),
                         ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isPredSelected
-                                ? const Color(0xFFFFD700)
-                                : const Color(0xFF2E2245),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            predOdds == null
-                                ? 'Odds unavailable'
-                                : '@${fx.oddsForPrediction(pred)}',
-                            style: TextStyle(
+                        if (predOdds != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
                               color: isPredSelected
-                                  ? const Color(0xFF0D0B12)
-                                  : const Color(0xFFFFD700),
-                              fontSize: 15,
-                              fontWeight: FontWeight.w900,
+                                  ? const Color(0xFFFFD700)
+                                  : const Color(0xFF2E2245),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '@${fx.oddsForPrediction(pred)}',
+                              style: TextStyle(
+                                color: isPredSelected
+                                    ? const Color(0xFF0D0B12)
+                                    : const Color(0xFFFFD700),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -1125,17 +1171,25 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
     required Color textColor,
     required Color mutedTextColor,
   }) {
+    final fixture = _enrichedDetail?.fixture ?? widget.initialFixture;
     final isSelected =
-        widget.isOddSelected?.call(widget.fixtureId, marketKey, selection) ??
-        false;
-
+        fixture != null &&
+        (widget.isOddSelected?.call(fixture, marketKey, selection) ?? false);
+    final canSelect =
+        fixture != null &&
+        isUpcomingBettingFixture(
+          fixture.matchTime.toIso8601String(),
+          status: fixture.status,
+        );
     return InkWell(
-      onTap: () {
-        if (widget.onToggleOdd != null) {
-          widget.onToggleOdd!(widget.fixtureId, marketKey, selection, oddsVal);
-          setState(() {});
-        }
-      },
+      onTap: !canSelect
+          ? null
+          : () {
+              if (widget.onToggleOdd != null) {
+                widget.onToggleOdd!(fixture, marketKey, selection, oddsVal);
+                setState(() {});
+              }
+            },
       borderRadius: BorderRadius.circular(10),
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
@@ -1187,12 +1241,16 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(label, style: TextStyle(color: mutedTextColor, fontSize: 13)),
-        Text(
-          value,
-          style: TextStyle(
-            color: textColor,
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            style: TextStyle(
+              color: textColor,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
       ],
@@ -1680,8 +1738,9 @@ class _MatchDetailScreenState extends State<MatchDetailScreen>
                                 vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF00E676)
-                                    .withValues(alpha: 0.2),
+                                color: const Color(
+                                  0xFF00E676,
+                                ).withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(

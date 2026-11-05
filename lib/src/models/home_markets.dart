@@ -1144,6 +1144,27 @@ HomeOddsOption? homePredictionOption(
   PredictionModel prediction,
   String sport,
 ) {
+  // Dedicated half/team/player markets can carry verified bookmaker IDs even
+  // when they are not one of the home screen's standard market filters.
+  if (prediction.hasApprovedPredictionPrice &&
+      prediction.sportyMarketId.isNotEmpty &&
+      prediction.sportyOutcomeId.isNotEmpty) {
+    final price = marketPrice(prediction.effectiveOdds);
+    if (price.isNotEmpty) {
+      return HomeOddsOption(
+        prediction.prediction,
+        prediction.prediction,
+        price,
+        prediction.market.isNotEmpty
+            ? prediction.market
+            : predictionHomeMarket(prediction.prediction, sport) ??
+                  'Prediction',
+        sportyMarketId: prediction.sportyMarketId,
+        sportyOutcomeId: prediction.sportyOutcomeId,
+        sportySpecifier: prediction.sportySpecifier,
+      );
+    }
+  }
   final market = predictionHomeMarket(prediction.prediction, sport);
   if (market == null) return null;
   final line = predictionTotalLine(prediction.prediction);
@@ -1157,7 +1178,9 @@ HomeOddsOption? homePredictionOption(
           }.contains(market)
       ? '$market ${_lineLabel(line)}'
       : market;
-  if (!fixture.hasPrematchMarketSnapshot && prediction.oddsPhase != 'prematch')
+  if (!fixture.hasPrematchMarketSnapshot &&
+      prediction.oddsPhase != 'prematch' &&
+      prediction.oddsPhase != 'source')
     return null;
   if (prediction.oddsSource.isNotEmpty || prediction.oddsPhase.isNotEmpty) {
     final price = prediction.hasApprovedPredictionPrice
@@ -1277,7 +1300,9 @@ String homePredictionOdds(
   PredictionModel prediction,
   String sport,
 ) {
-  if (!fixture.hasPrematchMarketSnapshot && prediction.oddsPhase != 'prematch')
+  if (!fixture.hasPrematchMarketSnapshot &&
+      prediction.oddsPhase != 'prematch' &&
+      prediction.oddsPhase != 'source')
     return '';
   if (prediction.oddsSource.isNotEmpty || prediction.oddsPhase.isNotEmpty) {
     return prediction.hasApprovedPredictionPrice
@@ -1308,7 +1333,7 @@ String predictionConfidenceLabel(Map<String, dynamic> item) {
   if ((item['source'] ?? item['provider']) == 'betexplorer') {
     final extra = item['extra'];
     if (extra is! Map ||
-        extra['probability_source'] != 'betmines' ||
+        extra['probability_source'] != 'forebet' ||
         extra['probability_kind'] != 'model')
       return '\u2014';
     final value = double.tryParse(item['probability']?.toString() ?? '');
@@ -1402,3 +1427,15 @@ HomeProbabilityReview? homePredictionProbabilityReview(
     probability: homePredictionProbability(fixture, prediction, sport),
   );
 }
+
+String predictionBookmakerAvailability(Map<String, dynamic> item) =>
+    switch (item['sporty_sync_reason']) {
+      'fixture_not_listed' => 'Fixture unavailable on SportyBet',
+      'outcome_not_in_current_snapshot' => 'Market unavailable on SportyBet',
+      'prematch_price_not_verified' => 'Prematch odds unavailable',
+      'fixture_snapshot_unavailable' => 'Odds temporarily unavailable',
+      _ =>
+        item['match_reason'] != null && item['match_reason'] != ''
+            ? 'Fixture could not be matched'
+            : 'Bookmaker odds unavailable',
+    };

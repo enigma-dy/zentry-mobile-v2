@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'auth_screen.dart';
+import 'services/prediction_feed_loader.dart';
 import 'ads/ad_slot.dart';
 import 'live_tv/live_tv_screen.dart';
 import 'brand.dart';
@@ -32,6 +33,7 @@ import 'game_center.dart';
 import 'fixture_duel_view.dart';
 import 'models/paginated_response.dart';
 import 'models/ticket_bucket_model.dart';
+import 'models/betting_availability.dart';
 import 'models/ace_channel_model.dart';
 import 'match_detail_screen.dart';
 import 'fpl_duel_view.dart';
@@ -166,7 +168,51 @@ class _HomeScreenState extends State<HomeScreen> {
 
   int _popularFilterIndex = 0;
   int _popularPredictionPage = 1;
+  final ScrollController _predictionScrollController = ScrollController();
+  Map<String, dynamic>? _predictionSnapshot;
+  bool _predictionLoadingMore = false;
+  String? _predictionMoreError;
+  int _predictionGeneration = 0;
+  bool _predictionRefreshing = false;
+  Timer? _predictionRetryTimer;
+  bool _predictionAccessAtLoad = false;
+  String? _predictionTokenAtLoad;
+
+  void _onPredictionSessionChanged() {
+    final access = _hasPredictionAccess;
+    if (!mounted ||
+        access == _predictionAccessAtLoad &&
+            SessionManager.instance.accessToken == _predictionTokenAtLoad) {
+      return;
+    }
+    _predictionTokenAtLoad = SessionManager.instance.accessToken;
+    _predictionAccessAtLoad = access;
+    _loadPopularPredictions(_popularFilterIndex);
+  }
+
+  void _schedulePredictionRetry(int version) {
+    if (!mounted || !_hasPredictionAccess || version != _predictionGeneration) {
+      return;
+    }
+    _predictionRetryTimer?.cancel();
+    _predictionRetryTimer = Timer(const Duration(seconds: 10), () {
+      if (mounted && version == _predictionGeneration) {
+        _loadPopularPredictions(_popularFilterIndex, true);
+      }
+    });
+  }
+
   int _footballMarketIndex = 0;
+
+  bool get _hasFootballTopPredictions => const {
+    'Over 1.5 Goals',
+    'Over 2.5 Goals',
+    '1X2',
+    'BTTS',
+    'Corners Market',
+    'First Half Goals',
+    'Second Half Goals',
+  }.contains(_footballMarketTags[_footballMarketIndex]);
   int _otherSportSubTabIndex = 0;
   int _ratingBetMarketIndex = 0;
   Future<Map<String, dynamic>>? _popularPredictionsFuture;
@@ -337,85 +383,248 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _loadPopularPredictions([int filterIndex = 0, int page = 1]) {
-    if (!_hasPredictionAccess) {
-      setState(() {
-        _popularFilterIndex = filterIndex;
-        _popularPredictionsFuture = Future.value({
-          'items': <dynamic>[],
-          'tags': <dynamic>[],
-          'total': 0,
-        });
-      });
-      return;
-    }
-    final safeIndex = filterIndex.clamp(0, _popularFilterLabels.length - 1);
+  void _loadPopularPredictions([int filterIndex = 0, bool background = false]) {
+    _predictionRetryTimer?.cancel();
+    final version = ++_predictionGeneration;
     setState(() {
-      _popularFilterIndex = safeIndex;
-      _popularPredictionPage = page < 1 ? 1 : page;
-      if (safeIndex == _ratingBetFilterIndex) {
-        if (_ratingBetMarkets.isEmpty) {
-          _ratingBetMarkets = _initialRatingBetMarkets;
-        }
-        _ratingBetMarketIndex = _ratingBetMarketIndex.clamp(
-          0,
-          _ratingBetMarkets.length - 1,
-        );
-        _popularPredictionsFuture = _retryPredictionLoad(
-          () => _loadZaiMarket(
-            _ratingBetMarkets[_ratingBetMarketIndex]['key']!,
-            _popularPredictionPage,
-          ),
-        );
-      } else if (safeIndex == 1) {
-        _popularPredictionsFuture = _retryPredictionLoad(
-          () => _sportsService.getBestPicks(
-            date: _homeDate,
-            page: _popularPredictionPage,
-            pageSize: 20,
-          ),
-        );
-      } else if (safeIndex == 2) {
-        _popularPredictionsFuture = _retryPredictionLoad(
-          () => _sportsService.getPlayerProps(
-            date: _homeDate,
-            page: _popularPredictionPage,
-            pageSize: 20,
-          ),
-        );
-      } else if (safeIndex == 3) {
-        _popularPredictionsFuture = _retryPredictionLoad(
-          () =>
-              _loadFootballMarket(_footballMarketIndex, _popularPredictionPage),
-        );
-      } else if (safeIndex == _accumulatorFilterIndex) {
-        _popularPredictionsFuture = _retryPredictionLoad(
-          () => _sportsService.getAccumulatorPredictions(date: _homeDate),
-        );
-      } else if (safeIndex >= 5) {
-        _popularPredictionsFuture = _retryPredictionLoad(
-          () => _loadOtherSportMarket(
-            safeIndex,
-            _otherSportSubTabIndex,
-            _popularPredictionPage,
-          ),
-        );
-      } else {
-        _popularPredictionsFuture = _retryPredictionLoad(
-          () => _sportsService.getPopularPredictions(
-            date: _homeDate,
-            page: _popularPredictionPage,
-            pageSize: 20,
-          ),
-        );
-      }
+      _popularFilterIndex = filterIndex.clamp(
+        0,
+        _popularFilterLabels.length - 1,
+      );
+      _popularPredictionPage = 1;
+      if (!background) _predictionSnapshot = null;
+      _predictionLoadingMore = false;
+      _predictionMoreError = null;
+      _popularPredictionsFuture = _requestPredictionPage(1).then(
+        (data) {
+          if (mounted && version == _predictionGeneration) {
+            _predictionSnapshot = data;
+            if (data['loading'] == true || data['retry_pending'] == true) {
+              _schedulePredictionRetry(version);
+            }
+          }
+          return data;
+        },
+        onError: (Object error, StackTrace stack) {
+          if (background && _predictionSnapshot != null) {
+            _schedulePredictionRetry(version);
+            return {..._predictionSnapshot!, 'retry_pending': true};
+          }
+          return <String, dynamic>{
+            'items': <dynamic>[],
+            'loading': false,
+            'load_error': error.toString(),
+          };
+        },
+      );
     });
+    if (!background && _predictionScrollController.hasClients) {
+      _predictionScrollController.jumpTo(0);
+    }
   }
 
-  Future<Map<String, dynamic>> _loadFootballMarket(int marketIndex, int page) {
-    final safeIndex = marketIndex.clamp(0, _footballMarketTags.length - 1);
-    _footballMarketIndex = safeIndex;
-    if (_footballMarketTags[safeIndex] == 'Draw Predictions') {
+  Future<Map<String, dynamic>> _requestPredictionPage(int page) {
+    if (!_hasPredictionAccess) {
+      return Future.value({'items': [], 'groups': [], 'total_pages': 1});
+    }
+    final index = _popularFilterIndex;
+    if (index == _ratingBetFilterIndex) {
+      if (_ratingBetMarkets.isEmpty) {
+        _ratingBetMarkets = _initialRatingBetMarkets;
+      }
+      _ratingBetMarketIndex = _ratingBetMarketIndex.clamp(
+        0,
+        _ratingBetMarkets.length - 1,
+      );
+      return _retryPredictionLoad(
+        () => _loadZaiMarket(
+          _ratingBetMarkets[_ratingBetMarketIndex]['key']!,
+          page,
+        ),
+      );
+    }
+    if (index == 1) {
+      return _retryPredictionLoad(
+        () => _sportsService.getBestPicks(
+          date: _homeDate,
+          page: page,
+          pageSize: 20,
+        ),
+      );
+    }
+    if (index == 2) {
+      return _retryPredictionLoad(
+        () => _sportsService.getPlayerProps(
+          date: _homeDate,
+          page: page,
+          pageSize: 20,
+        ),
+      );
+    }
+    if (index == 3) {
+      return _retryPredictionLoad(
+        () => _loadFootballMarket(_footballMarketIndex, page),
+      );
+    }
+    if (index == _accumulatorFilterIndex) {
+      return _retryPredictionLoad(
+        () => _sportsService.getAccumulatorPredictions(date: _homeDate),
+      );
+    }
+    if (index >= 5) {
+      return _retryPredictionLoad(
+        () => _loadOtherSportMarket(index, _otherSportSubTabIndex, page),
+      );
+    }
+    return _retryPredictionLoad(
+      () => _sportsService.getPopularPredictions(
+        date: _homeDate,
+        page: page,
+        pageSize: 20,
+      ),
+    );
+  }
+
+  List<Map<String, dynamic>> _predictionRows(dynamic value) =>
+      (value is List ? value : const [])
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+
+  List<Map<String, dynamic>> _mergePredictionRows(
+    dynamic first,
+    dynamic second,
+  ) {
+    final rows = <String, Map<String, dynamic>>{};
+    for (final item in [
+      ..._predictionRows(first),
+      ..._predictionRows(second),
+    ]) {
+      final key =
+          '${item['source']}|${item['id'] ?? item['fixture_id']}|${item['market']}|${item['selection']}';
+      rows[key] = item;
+    }
+    return rows.values.toList();
+  }
+
+  void _onPredictionScroll() {
+    if (_predictionScrollController.hasClients &&
+        _predictionScrollController.position.extentAfter < 600) {
+      unawaited(_loadMorePredictions());
+    }
+  }
+
+  Future<void> _loadMorePredictions() async {
+    final current = _predictionSnapshot;
+    if (!mounted ||
+        current == null ||
+        _predictionLoadingMore ||
+        _predictionMoreError != null) {
+      return;
+    }
+    final pages = int.tryParse('${current['total_pages'] ?? 1}') ?? 1;
+    if (_popularPredictionPage >= pages) return;
+    final version = _predictionGeneration;
+    final next = _popularPredictionPage + 1;
+    setState(() => _predictionLoadingMore = true);
+    try {
+      final incoming = await _requestPredictionPage(next);
+      if (!mounted || version != _predictionGeneration) return;
+      final groups = <String, Map<String, dynamic>>{};
+      for (final group in [
+        ..._predictionRows(current['groups']),
+        ..._predictionRows(incoming['groups']),
+      ]) {
+        final key = '${group['id'] ?? group['market']}';
+        final previous = groups[key];
+        groups[key] = {
+          ...group,
+          'items': _mergePredictionRows(previous?['items'], group['items']),
+        };
+      }
+      final merged = {
+        ...current,
+        ...incoming,
+        'items': _mergePredictionRows(current['items'], incoming['items']),
+        'groups': groups.values.toList(),
+        'top_items': current['top_items'] ?? const [],
+      };
+      if (_predictionRows(incoming['items']).isEmpty &&
+          _predictionRows(incoming['groups']).isEmpty) {
+        merged['total_pages'] = next;
+      }
+      setState(() {
+        _popularPredictionPage = next;
+        _predictionSnapshot = merged;
+        _popularPredictionsFuture = Future.value(merged);
+      });
+    } catch (error) {
+      if (mounted && version == _predictionGeneration) {
+        setState(() => _predictionMoreError = error.toString());
+      }
+    } finally {
+      if (mounted && version == _predictionGeneration) {
+        setState(() => _predictionLoadingMore = false);
+      }
+    }
+  }
+
+  Future<void> _refreshLoadedPredictionResults() async {
+    if (!_predictionScrollController.hasClients ||
+        _predictionSnapshot == null ||
+        _predictionLoadingMore ||
+        _predictionRefreshing) {
+      return;
+    }
+    _predictionRefreshing = true;
+    final version = _predictionGeneration;
+    try {
+      final pages = await Future.wait([
+        for (var page = 1; page <= _popularPredictionPage; page++)
+          _requestPredictionPage(page),
+      ]);
+      if (!mounted || version != _predictionGeneration) return;
+      var items = <Map<String, dynamic>>[];
+      final groups = <String, Map<String, dynamic>>{};
+      for (final data in pages) {
+        items = _mergePredictionRows(items, data['items']);
+        for (final group in _predictionRows(data['groups'])) {
+          final key = '${group['id'] ?? group['market']}';
+          groups[key] = {
+            ...group,
+            'items': _mergePredictionRows(
+              groups[key]?['items'],
+              group['items'],
+            ),
+          };
+        }
+      }
+      final updated = {
+        ...pages.first,
+        'items': items,
+        'groups': groups.values.toList(),
+        'page': _popularPredictionPage,
+      };
+      setState(
+        () => _popularPredictionsFuture = Future.value(
+          _predictionSnapshot = updated,
+        ),
+      );
+    } catch (_) {
+      /* Keep the loaded list on a transient refresh failure. */
+    } finally {
+      _predictionRefreshing = false;
+    }
+  }
+
+  Future<Map<String, dynamic>> _loadFootballMarket(
+    int marketIndex,
+    int page,
+  ) async {
+    final index = marketIndex.clamp(0, _footballMarketTags.length - 1);
+    _footballMarketIndex = index;
+    final tag = _footballMarketTags[index];
+    if (tag == 'Draw Predictions') {
       return _sportsService.getRatingBetPredictions(
         market: 'draw',
         date: _homeDate,
@@ -423,13 +632,56 @@ class _HomeScreenState extends State<HomeScreen> {
         pageSize: 20,
       );
     }
-    return _sportsService.getPredictionFeed(
-      sport: 'Football',
-      tag: _footballMarketTags[safeIndex],
-      date: _homeDate,
-      page: page,
-      pageSize: 20,
+    final generation = _predictionGeneration;
+    final needsTop = page == 1 && _hasFootballTopPredictions;
+    final data = await loadPredictionSections(
+      general: _sportsService.getPredictionFeed(
+        section: 'general',
+        sport: 'Football',
+        tag: tag,
+        date: _homeDate,
+        page: page,
+        pageSize: 20,
+      ),
+      top: needsTop
+          ? _sportsService.getPredictionFeed(
+              section: 'top',
+              sport: 'Football',
+              tag: tag,
+              date: _homeDate,
+              page: 1,
+              pageSize: 50,
+            )
+          : null,
+      onTopReady: (top) {
+        // Let the initial general response install its snapshot first.
+        unawaited(
+          Future<void>.delayed(Duration.zero, () {
+            if (!mounted ||
+                generation != _predictionGeneration ||
+                _popularFilterIndex != 3 ||
+                _footballMarketIndex != index) {
+              return;
+            }
+            final current = _predictionSnapshot;
+            if (current == null) return;
+            final updated = mergePredictionSections(current, top, hasTop: true);
+            setState(() {
+              _predictionSnapshot = updated;
+              _popularPredictionsFuture = Future.value(updated);
+            });
+            if (updated['retry_pending'] == true) {
+              _schedulePredictionRetry(generation);
+            }
+          }),
+        );
+      },
     );
+    return {
+      ...data,
+      'general_title': _footballMarketLabels[index],
+      'has_top_section': _hasFootballTopPredictions,
+    };
   }
 
   Future<Map<String, dynamic>> _loadOtherSportMarket(
@@ -489,7 +741,8 @@ class _HomeScreenState extends State<HomeScreen> {
       final markets = <Map<String, String>>[
         ..._zaiFeaturedMarkets,
         ...providerMarkets.where(
-          (market) => !featuredKeys.contains(market['key']) && market['key'] != 'draw',
+          (market) =>
+              !featuredKeys.contains(market['key']) && market['key'] != 'draw',
         ),
       ];
       if (markets.isNotEmpty) {
@@ -508,20 +761,12 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<Map<String, dynamic>> _loadZaiMarket(String marketKey, int page) {
     switch (marketKey) {
       case 'zai-2-odds':
-        // This matches the legacy ZAI (2odds) product: a small bundle whose
-        // real combined SportyBet odds are selected as close to 2.00 as possible.
-        return _sportsService.getAccumulatorPredictions(
-          targetOdds: 2,
-          minConfidence: 75,
-          date: _homeDate,
-        );
+        return _sportsService.getZaiVipPredictions(date: _homeDate);
       case 'zai-accumulators':
-        // The backend returns the legacy-style market groups, with a 2.00 and
-        // 3.00 target accumulator for each available market.
-        return _sportsService.getAccumulatorPredictions(
-          targetOdds: 3,
+        return _sportsService.getZaiMarketLists(
           date: _homeDate,
-          minConfidence: 75,
+          page: page,
+          pageSize: 20,
         );
       default:
         return _loadRatingBetMarket(marketKey, page);
@@ -531,29 +776,26 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<Map<String, dynamic>> _retryPredictionLoad(
     Future<Map<String, dynamic>> Function() request,
   ) async {
-    Object? lastError;
-    Map<String, dynamic>? lastResponse;
-    for (var attempt = 0; attempt < 3; attempt++) {
-      try {
-        final response = await request();
-        lastResponse = response;
-        final items = response['items'];
-        if (items is List && items.isNotEmpty) return response;
-      } catch (error) {
-        lastError = error;
-      }
-      if (attempt < 2) {
-        await Future<void>.delayed(Duration(seconds: attempt + 1));
-      }
-    }
-    if (lastResponse != null) return lastResponse;
-    throw lastError ?? StateError('Predictions are temporarily unavailable');
+    final generation = _predictionGeneration;
+    return loadPredictionFeed(
+      request,
+      shouldContinue: () => mounted && generation == _predictionGeneration,
+      shouldRetryError: (error) =>
+          error is! SportsException ||
+          error.statusCode == 408 ||
+          error.statusCode == 429 ||
+          error.statusCode >= 500,
+    );
   }
 
   @override
   void initState() {
     super.initState();
+    _predictionAccessAtLoad = _hasPredictionAccess;
+    _predictionTokenAtLoad = SessionManager.instance.accessToken;
+    SessionManager.instance.addListener(_onPredictionSessionChanged);
     _homeScrollController.addListener(_onScroll);
+    _predictionScrollController.addListener(_onPredictionScroll);
     _loadSportsData();
     unawaited(_loadHomeBanner());
     _loadPopularPredictions(0);
@@ -577,6 +819,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _pollNotifications(),
         _checkForAppUpdate(),
         _loadHomeBanner(),
+        _refreshLoadedPredictionResults(),
       ]);
     } finally {
       _backgroundRefreshRunning = false;
@@ -872,8 +1115,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _predictionRetryTimer?.cancel();
+    SessionManager.instance.removeListener(_onPredictionSessionChanged);
     _refreshTimer?.cancel();
     unawaited(_notificationService.close());
+    _predictionScrollController.removeListener(_onPredictionScroll);
+    _predictionScrollController.dispose();
     _homeScrollController.removeListener(_onScroll);
     _homeScrollController.dispose();
     super.dispose();
@@ -1486,7 +1733,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-
   String _convertSourcePlatform = 'SportyBet';
   String _convertTargetPlatform = 'MSport';
   String _convertCodeText = '';
@@ -1960,17 +2206,17 @@ class _HomeScreenState extends State<HomeScreen> {
     return market == 'GG/NG' ? 'GG' : market ?? 'Prediction';
   }
 
-  void _toggleOdds(String matchId, String option) {
-    final key = '$matchId-$option';
-    setState(() {
-      if (_selectedOddsKeys.contains(key)) {
-        _selectedOddsKeys.remove(key);
-        _selectedTicketItems.remove(key);
-      } else {
-        _selectedOddsKeys.add(key);
-      }
-    });
-  }
+  Map<String, dynamic> _fixtureBookmakers(FixtureModel fixture) => {
+    for (final mapping in fixture.providerMappings)
+      if (mapping.provider == 'sporty' || mapping.provider == '1xbet')
+        mapping.provider: {
+          'provider': mapping.provider,
+          'available': mapping.sourceFixtureId.isNotEmpty,
+          'event_id': mapping.sourceFixtureId,
+          'league_id': mapping.sourceLeagueId,
+        },
+    ...?fixture.prediction?.bookmakers,
+  };
 
   void _toggleFixtureOddsSelection(
     FixtureModel fx,
@@ -1981,6 +2227,12 @@ class _HomeScreenState extends State<HomeScreen> {
     String sportyOutcomeId = '',
     String sportySpecifier = '',
   }) {
+    if (!isUpcomingBettingFixture(
+      fx.matchTime.toIso8601String(),
+      status: fx.status,
+    )) {
+      return;
+    }
     final key = homeOddsSelectionKey(fx.id, marketKey, option);
     final prediction = fx.prediction;
     final predictionOption = prediction == null
@@ -2009,6 +2261,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (oddVal == null || !oddVal.isFinite || oddVal <= 1) return;
         _selectedOddsKeys.add(key);
         _selectedTicketItems[key] = TicketSelectionModel(
+          bookmakers: _fixtureBookmakers(fx),
           fixtureId: fx.id,
           sportId: fx.sportId,
           sportyEventId: fx.sportyEventId,
@@ -2033,6 +2286,12 @@ class _HomeScreenState extends State<HomeScreen> {
     FixtureModel fx,
     PredictionModel pred,
   ) {
+    if (!isUpcomingBettingFixture(
+      fx.matchTime.toIso8601String(),
+      status: fx.status,
+    )) {
+      return;
+    }
     final oddVal = double.tryParse(
       homePredictionOdds(fx, pred, _activeSportKey),
     );
@@ -2057,6 +2316,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _selectedOddsKeys.add(key);
         _selectedOddsKeys.add(oddKey);
         _selectedTicketItems[key] = TicketSelectionModel(
+          bookmakers: _fixtureBookmakers(fx),
           fixtureId: fx.id,
           sportId: fx.sportId,
           sportyEventId: fx.sportyEventId,
@@ -2084,6 +2344,12 @@ class _HomeScreenState extends State<HomeScreen> {
     String selection,
     double odds,
   ) {
+    if (!isUpcomingBettingFixture(
+      fx.matchTime.toIso8601String(),
+      status: fx.status,
+    )) {
+      return;
+    }
     final key = _detailSelectionKey(fx, marketKey, selection);
     final predictionOption = fx.prediction == null
         ? null
@@ -2114,20 +2380,20 @@ class _HomeScreenState extends State<HomeScreen> {
           _selectedOddsKeys.add(predKey);
         }
         _selectedTicketItems[key] = TicketSelectionModel(
+          bookmakers: _fixtureBookmakers(fx),
           fixtureId: fx.id,
           sportId: fx.sportId,
           sportyEventId: fx.sportyEventId,
+          sportyMarketId: linked ? predictionOption?.sportyMarketId : null,
+          sportyOutcomeId: linked ? predictionOption?.sportyOutcomeId : null,
+          sportySpecifier: linked ? predictionOption?.sportySpecifier : null,
           predictionId: fx.prediction?.id,
           homeTeam: fx.homeTeam,
           awayTeam: fx.awayTeam,
           leagueName: fx.leagueName,
           matchTime: fx.matchTime.toIso8601String(),
           marketType: marketKey.toUpperCase() == 'PREDICTION'
-              ? homePredictionOption(
-                      fx,
-                      PredictionModel(id: '', prediction: selection),
-                      _activeSportKey,
-                    )?.marketKey ??
+              ? predictionOption?.marketKey ??
                     _mapPredictionToMarketType(selection)
               : marketKey,
           selection: selection,
@@ -2138,13 +2404,18 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  PredictionModel fxPrediction(FixtureModel fixture, String selection) =>
+      fixture.prediction?.prediction == selection
+      ? fixture.prediction!
+      : PredictionModel(id: '', prediction: selection);
+
   String _detailSelectionKey(
     FixtureModel fixture,
     String marketKey,
     String selection,
   ) {
     if (marketKey.toUpperCase() == 'PREDICTION') {
-      final prediction = PredictionModel(id: '', prediction: selection);
+      final prediction = fxPrediction(fixture, selection);
       final option = homePredictionOption(fixture, prediction, _activeSportKey);
       return homeOddsSelectionKey(
         fixture.id,
@@ -2389,7 +2660,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         key: ValueKey('page-ad-$_topTabNavIndex'),
                         placement: {4, 9}.contains(_topTabNavIndex)
                             ? AdPlacement.prediction
-                            : _topTabNavIndex == 1 ? AdPlacement.match : AdPlacement.home,
+                            : _topTabNavIndex == 1
+                            ? AdPlacement.match
+                            : AdPlacement.home,
                       ),
                   ],
                 ),
@@ -6990,12 +7263,7 @@ class _HomeScreenState extends State<HomeScreen> {
           builder: (modalContext, setModalState) {
             final items = _selectedTicketItems.values.toList();
             final count = items.length;
-            final double totalOdds = items.isEmpty
-                ? 1.0
-                : items.fold(
-                    1.0,
-                    (acc, item) => acc * (item.odds > 0 ? item.odds : 1.0),
-                  );
+            final double totalOdds = ticketSelectionsTotalOdds(items);
 
             return Container(
               height: MediaQuery.of(context).size.height * 0.75,
@@ -7176,7 +7444,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ),
                                     ),
                                     Text(
-                                      sel.odds.toStringAsFixed(2),
+                                      ticketOddsLabel(sel.odds),
                                       style: const TextStyle(
                                         color: Color(0xFFFFD700),
                                         fontSize: 15,
@@ -7268,7 +7536,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                                 Text(
-                                  totalOdds.toStringAsFixed(2),
+                                  ticketOddsLabel(totalOdds),
                                   style: const TextStyle(
                                     color: Color(0xFFFFD700),
                                     fontSize: 18,
@@ -7469,7 +7737,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                   Text(
-                    'Total Odds: @ ${result.totalOdds.toStringAsFixed(2)}',
+                    'Total Odds: @ ${ticketOddsLabel(result.totalOdds)}',
                     style: const TextStyle(
                       color: Color(0xFFFFD700),
                       fontSize: 12,
@@ -7524,6 +7792,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final isMobile = constraints.maxWidth < 600;
 
     return SingleChildScrollView(
+      controller: _predictionScrollController,
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? 12 : 20,
         vertical: 12,
@@ -7543,6 +7812,7 @@ class _HomeScreenState extends State<HomeScreen> {
               border: Border.all(color: const Color(0xFF302343)),
             ),
             child: ListView.separated(
+              key: const ValueKey('prediction-category-list'),
               scrollDirection: Axis.horizontal,
               itemCount: _popularFilterLabels.length,
               separatorBuilder: (_, _) => const SizedBox(width: 4),
@@ -7553,6 +7823,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     ? const Color(0xFF00E5FF)
                     : const Color(0xFFFFD700);
                 return Semantics(
+                  key: ValueKey(
+                    'prediction-filter-${_popularFilterLabels[index]}',
+                  ),
                   button: true,
                   selected: isSelected,
                   child: Material(
@@ -7652,7 +7925,12 @@ class _HomeScreenState extends State<HomeScreen> {
           FutureBuilder<Map<String, dynamic>>(
             future: _popularPredictionsFuture,
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
+              if (snapshot.connectionState == ConnectionState.waiting &&
+                  !predictionFeedHasContent(
+                    snapshot.data ?? const <String, dynamic>{},
+                  ) &&
+                  _popularPredictionPage == 1 &&
+                  !_predictionLoadingMore) {
                 return Container(
                   height: 250,
                   alignment: Alignment.center,
@@ -7670,17 +7948,21 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               }
 
-              if (snapshot.hasError) {
+              if (snapshot.hasError || snapshot.data?['load_error'] != null) {
                 return _buildPredictionFeedState(
                   icon: Icons.cloud_off_rounded,
                   title: 'Could not load predictions',
-                  message: 'Check your connection and try again.',
+                  message:
+                      snapshot.data?['load_error']?.toString() ??
+                      snapshot.error?.toString() ??
+                      'Check your connection and try again.',
                   showRetry: true,
                 );
               }
 
               final rawItems = snapshot.data?['items'] as List?;
               final rawGroups = snapshot.data?['groups'] as List?;
+              final topItems = _predictionRows(snapshot.data?['top_items']);
               List<Map<String, dynamic>> items = [];
 
               if (rawItems != null && rawItems.isNotEmpty) {
@@ -7696,11 +7978,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   .where((group) => group['items'] is List)
                   .toList();
 
-              if (items.isEmpty && groups.isEmpty) {
+              if (items.isEmpty && groups.isEmpty && topItems.isEmpty) {
                 return _buildPredictionFeedState(
                   icon: Icons.insights_rounded,
-                  title: 'No predictions available',
-                  message: 'New predictions will appear after the next sync.',
+                  title: snapshot.data?['loading'] == true
+                      ? 'Preparing daily predictions'
+                      : 'No predictions available',
+                  message:
+                      snapshot.data?['message']?.toString() ??
+                      (snapshot.data?['loading'] == true
+                          ? 'Daily picks are being cached. This page refreshes automatically.'
+                          : 'No predictions are available for this date.'),
                   showRetry: true,
                 );
               }
@@ -7710,24 +7998,41 @@ class _HomeScreenState extends State<HomeScreen> {
                       _ratingBetMarkets.isNotEmpty
                   ? _ratingBetMarkets[_ratingBetMarketIndex]['key'] ?? ''
                   : '';
-              final currentPage =
-                  int.tryParse(snapshot.data?['page']?.toString() ?? '') ??
-                  _popularPredictionPage;
-              final totalPages =
-                  int.tryParse(
-                    snapshot.data?['total_pages']?.toString() ?? '',
-                  ) ??
-                  1;
               return Column(
                 children: [
-                  if (selectedZaiMarket == 'zai-2-odds' ||
-                      selectedZaiMarket == 'zai-accumulators')
+                  if (_popularFilterIndex == 3 &&
+                      snapshot.data?['has_top_section'] == true) ...[
+                    _predictionSectionHeading('Top'),
+                    if (topItems.isEmpty)
+                      Padding(
+                        padding: EdgeInsets.only(bottom: 16),
+                        child: Text(
+                          snapshot.data?['top_load_error'] != null
+                              ? 'Top predictions are temporarily unavailable.'
+                              : snapshot.data?['top_loading'] == true
+                              ? 'Preparing top predictions...'
+                              : 'No predictions above 75% for this market and date.',
+                          style: TextStyle(color: Colors.white54, fontSize: 12),
+                        ),
+                      ),
+                    ...topItems.asMap().entries.map(
+                      (entry) =>
+                          _buildScores24PopularCard(entry.value, entry.key),
+                    ),
+                    _predictionSectionHeading(
+                      snapshot.data?['general_title']?.toString() ??
+                          'Predictions',
+                    ),
+                  ],
+                  if (selectedZaiMarket == 'zai-2-odds')
                     _buildZaiFeaturedSummary(
                       selectedZaiMarket,
                       snapshot.data!,
                       items.length,
                     ),
-                  if (selectedZaiMarket == 'zai-accumulators' &&
+                  if ((selectedZaiMarket == 'zai-accumulators' ||
+                          selectedZaiMarket == 'zai-2-odds' ||
+                          _popularFilterIndex == _accumulatorFilterIndex) &&
                       groups.isNotEmpty)
                     ...groups.asMap().entries.map(
                       (entry) =>
@@ -7739,8 +8044,29 @@ class _HomeScreenState extends State<HomeScreen> {
                       final item = entry.value;
                       return _buildScores24PopularCard(item, idx);
                     }),
-                  if (totalPages > 1)
-                    _buildPredictionPagination(currentPage, totalPages),
+                  if (_predictionLoadingMore)
+                    const Padding(
+                      padding: EdgeInsets.all(18),
+                      child: CircularProgressIndicator(
+                        color: Color(0xFFFFD700),
+                      ),
+                    ),
+                  if (_predictionMoreError != null)
+                    TextButton(
+                      onPressed: () {
+                        setState(() => _predictionMoreError = null);
+                        unawaited(_loadMorePredictions());
+                      },
+                      child: const Text('Retry loading more'),
+                    ),
+                  Builder(
+                    builder: (context) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) _onPredictionScroll();
+                      });
+                      return const SizedBox(height: 20);
+                    },
+                  ),
                 ],
               );
             },
@@ -7788,7 +8114,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 Text(
-                  'Target ${target?.toStringAsFixed(2) ?? '-'}  •  ${total?.toStringAsFixed(2) ?? '-'}',
+                  target == null || target <= 0
+                      ? '${items.length} predictions'
+                      : 'Target ${target.toStringAsFixed(2)} / ${total?.toStringAsFixed(2) ?? '-'}',
                   style: const TextStyle(
                     color: Color(0xFFFFD700),
                     fontSize: 11,
@@ -7798,53 +8126,31 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 4),
-          ...items.asMap().entries.map(
-            (entry) => _buildScores24PopularCard(
-              entry.value,
-              groupIndex * 100 + entry.key,
+          if (group['booking_code']?.toString().isNotEmpty == true)
+            TextButton.icon(
+              icon: const Icon(Icons.copy, size: 16),
+              label: Text('Booking code: ${group['booking_code']}'),
+              onPressed: () async {
+                await Clipboard.setData(
+                  ClipboardData(text: group['booking_code'].toString()),
+                );
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Booking code copied')),
+                );
+              },
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPredictionPagination(int currentPage, int totalPages) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 20),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          OutlinedButton.icon(
-            onPressed: currentPage > 1
-                ? () => _loadPopularPredictions(
-                    _popularFilterIndex,
-                    currentPage - 1,
-                  )
-                : null,
-            icon: const Icon(Icons.chevron_left_rounded),
-            label: const Text('Previous'),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Text(
-              '$currentPage / $totalPages',
-              style: const TextStyle(
-                color: Colors.white70,
-                fontWeight: FontWeight.w700,
+          if (group['message']?.toString().isNotEmpty == true)
+            Padding(
+              padding: const EdgeInsets.all(4),
+              child: Text(
+                group['message'].toString(),
+                style: const TextStyle(color: Colors.white60, fontSize: 11),
               ),
             ),
-          ),
-          OutlinedButton.icon(
-            onPressed: currentPage < totalPages
-                ? () => _loadPopularPredictions(
-                    _popularFilterIndex,
-                    currentPage + 1,
-                  )
-                : null,
-            icon: const Icon(Icons.chevron_right_rounded),
-            label: const Text('Next'),
+          const SizedBox(height: 4),
+          ...items.asMap().entries.map(
+            (entry) => _buildScores24PopularCard(entry.value, entry.key),
           ),
         ],
       ),
@@ -7890,8 +8196,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 3),
                 Text(
                   isTwoOdds
-                      ? '$itemCount verified legs selected close to 2.00 total odds.'
-                      : '$itemCount high-confidence picks available for your accumulator.',
+                      ? '2.00 target bundles grouped by prediction source.'
+                      : 'Market accumulators with 2.00 and 3.00 targets.',
                   style: const TextStyle(color: Colors.white60, fontSize: 11),
                 ),
               ],
@@ -7905,7 +8211,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 borderRadius: BorderRadius.circular(9),
               ),
               child: Text(
-                totalOdds.toStringAsFixed(2),
+                ticketOddsLabel(totalOdds),
                 style: const TextStyle(
                   color: Color(0xFFFFD700),
                   fontWeight: FontWeight.w900,
@@ -7931,6 +8237,7 @@ class _HomeScreenState extends State<HomeScreen> {
         border: Border.all(color: const Color(0xFF302343)),
       ),
       child: ListView.separated(
+        key: const ValueKey('prediction-market-tabs'),
         scrollDirection: Axis.horizontal,
         itemCount: labels.length,
         separatorBuilder: (_, _) => const SizedBox(width: 4),
@@ -8015,7 +8322,10 @@ class _HomeScreenState extends State<HomeScreen> {
           if (showRetry) ...[
             const SizedBox(height: 16),
             OutlinedButton.icon(
-              onPressed: () => _loadPopularPredictions(_popularFilterIndex),
+              onPressed: () {
+                _sportsService.clearPredictionCache();
+                _loadPopularPredictions(_popularFilterIndex);
+              },
               icon: const Icon(Icons.refresh_rounded, size: 17),
               label: const Text('Retry'),
               style: OutlinedButton.styleFrom(
@@ -8030,6 +8340,52 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Build Scores24 Popular Consensus Card
+  Widget _predictionSectionHeading(String title) => Padding(
+    padding: const EdgeInsets.only(top: 8, bottom: 12),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        title,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 16,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ),
+  );
+
+  Widget _buildPredictionResult(Map<String, dynamic> item) {
+    final status = (item['status'] ?? 'pending').toString().toLowerCase();
+    final home = item['home_score'];
+    final away = item['away_score'];
+    final match = (item['match_status'] ?? '').toString().toLowerCase();
+    final decided = const {'won', 'lost', 'void'}.contains(status);
+    final score =
+        home != null &&
+            away != null &&
+            (decided || const {'finished', 'ft', 'live'}.contains(match))
+        ? '$home - $away  '
+        : '';
+    final label = decided
+        ? status.toUpperCase()
+        : match == 'live'
+        ? 'LIVE'
+        : 'PENDING';
+    return Text(
+      '$score$label',
+      style: TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+        color: status == 'won'
+            ? const Color(0xFF69F0AE)
+            : status == 'lost'
+            ? Colors.redAccent
+            : Colors.white54,
+      ),
+    );
+  }
+
   Widget _buildPredictionKickoff(String rawMatchTime) {
     final parsed = DateTime.tryParse(rawMatchTime)?.toLocal();
     if (parsed == null) {
@@ -8135,12 +8491,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildScores24PopularCard(Map<String, dynamic> item, int idx) {
-    final id = item['id']?.toString() ?? 'pred_$idx';
+    final ticketSelection = TicketSelectionModel.fromPrediction(item);
+    final id = ticketSelection.uniqueKey;
     final fixtureId = item['fixture_id']?.toString().trim() ?? '';
-    final sportId = int.tryParse(item['sport_id']?.toString() ?? '') ?? 0;
-    final sportyEventId = item['sporty_event_id']?.toString().trim() ?? '';
-    final sportyMarketId = item['sporty_market_id']?.toString().trim() ?? '';
-    final sportyOutcomeId = item['sporty_outcome_id']?.toString().trim() ?? '';
     final sport = item['sport']?.toString() ?? '';
     final homeTeam = item['home_team']?.toString() ?? '';
     final awayTeam = item['away_team']?.toString() ?? '';
@@ -8151,22 +8504,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final odds = (item['odds'] is num)
         ? (item['odds'] as num).toDouble()
         : (double.tryParse(item['odds']?.toString() ?? '') ?? 0);
-    final displayedConfidence = zaiPredictionConfidence(item);
 
     final isSelected = _selectedOddsKeys.contains(id);
     final isHockey = sport.toLowerCase().contains('hockey');
-    final isPlayerProp =
-        item['is_player_prop'] == true ||
-        item['tag']?.toString().toLowerCase() == 'player props' ||
-        item['market']?.toString().toLowerCase() == 'player props';
-    final canAddToBetslip =
-        odds > 1 &&
-        fixtureId.isNotEmpty &&
-        sportId > 0 &&
-        item['sportybet_available'] == true &&
-        sportyEventId.isNotEmpty &&
-        sportyMarketId.isNotEmpty &&
-        sportyOutcomeId.isNotEmpty;
+    final canAddToBetslip = ticketSelection.canAddToBucket;
 
     return InkWell(
       onTap: () {
@@ -8183,7 +8524,12 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (_) => MatchDetailScreen(fixtureId: fixtureId),
+            builder: (_) => MatchDetailScreen(
+              fixtureId: fixtureId,
+              sportsService: _sportsService,
+              onToggleOdd: _toggleDetailOddSelection,
+              isOddSelected: _isDetailOddSelected,
+            ),
           ),
         );
       },
@@ -8311,6 +8657,8 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 8),
 
             _buildPredictionKickoff(matchTime),
+            const SizedBox(height: 6),
+            _buildPredictionResult(item),
 
             const SizedBox(height: 10),
 
@@ -8354,31 +8702,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    odds > 1
-                        ? '@ ${odds.toStringAsFixed(2)}'
-                        : 'Odds unavailable',
-                    style: const TextStyle(
-                      color: Color(0xFFFFD700),
-                      fontWeight: FontWeight.w900,
-                      fontSize: 15,
+                  if (odds > 1) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      '@ ${odds.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        color: Color(0xFFFFD700),
+                        fontWeight: FontWeight.w900,
+                        fontSize: 15,
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
 
             const SizedBox(height: 12),
 
-            // Player props are informational until prop betslips are supported.
-            if (isPlayerProp)
-              const Text(
-                'Player props are view-only',
-                style: TextStyle(color: Colors.white54, fontSize: 11),
-                textAlign: TextAlign.center,
-              )
-            else
+            if (ticketSelection.isUpcoming) ...[
+              // Mapped bookmaker selections can be saved before odds arrive.
               SizedBox(
                 width: double.infinity,
                 height: 40,
@@ -8386,29 +8728,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: canAddToBetslip
                       ? () {
                           setState(() {
+                            if (!ticketSelection.canAddToBucket) return;
                             if (isSelected) {
                               _selectedOddsKeys.remove(id);
                               _selectedTicketItems.remove(id);
                             } else {
                               _selectedOddsKeys.add(id);
-                              _selectedTicketItems[id] = TicketSelectionModel(
-                                fixtureId: fixtureId,
-                                predictionId: id,
-                                sportId: sportId,
-                                sportyEventId: sportyEventId,
-                                sportyMarketId: sportyMarketId,
-                                sportyOutcomeId: sportyOutcomeId,
-                                sportySpecifier: item['sporty_specifier']
-                                    ?.toString(),
-                                homeTeam: homeTeam,
-                                awayTeam: awayTeam,
-                                leagueName: league,
-                                matchTime: matchTime,
-                                marketType: market,
-                                selection: selection,
-                                odds: odds,
-                                confidence: displayedConfidence,
-                              );
+                              _selectedTicketItems[id] = ticketSelection;
                             }
                           });
                         }
@@ -8420,13 +8746,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     size: 16,
                   ),
                   label: Text(
-                    odds <= 1
-                        ? 'Waiting for bookmaker odds'
-                        : (!canAddToBetslip
-                              ? 'SportyBet mapping unavailable'
-                              : (isSelected
-                                    ? 'Added to Betslip'
-                                    : 'Add to Betslip')),
+                    canAddToBetslip
+                        ? (isSelected ? 'Added to Betslip' : 'Add to Betslip')
+                        : predictionBookmakerAvailability(item),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
@@ -8450,6 +8772,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
+            ],
           ],
         ),
       ),
@@ -8514,337 +8837,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
-  }
-
-  Widget _buildPredictionCard(Map<String, dynamic> p, int idx) {
-    final id = p['id'] as String;
-    final isSelected =
-        _selectedOddsKeys.contains(id) || _selectedTicketItems.containsKey(id);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF181124),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: p['isBanker'] == true
-              ? const Color(0xFFFFD700).withValues(alpha: 0.5)
-              : const Color(0xFF352752),
-          width: p['isBanker'] == true ? 1.5 : 1.0,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header: League & Banker Badge
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  p['league'] as String,
-                  style: const TextStyle(
-                    color: Colors.white54,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (p['isBanker'] == true) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      margin: const EdgeInsets.only(right: 6),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFD700).withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFFFFD700)),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(
-                            Icons.local_fire_department_rounded,
-                            color: Color(0xFFFFD700),
-                            size: 12,
-                          ),
-                          SizedBox(width: 2),
-                          Text(
-                            'BANKER',
-                            style: TextStyle(
-                              color: Color(0xFFFFD700),
-                              fontSize: 9,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  Text(
-                    p['time'] as String,
-                    style: const TextStyle(color: Colors.white38, fontSize: 11),
-                  ),
-                ],
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 10),
-
-          // Teams Title
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '${p['homeTeam']}  vs  ${p['awayTeam']}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  'AI Conf: ${p['confidence']}',
-                  style: const TextStyle(
-                    color: Colors.greenAccent,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 12),
-
-          // Probability Bar (Home / Draw / Away)
-          Builder(
-            builder: (context) {
-              final homeProb =
-                  (p['homeProb'] is int
-                      ? p['homeProb'] as int
-                      : int.tryParse(p['homeProb']?.toString() ?? '')) ??
-                  33;
-              final drawProb =
-                  (p['drawProb'] is int
-                      ? p['drawProb'] as int
-                      : int.tryParse(p['drawProb']?.toString() ?? '')) ??
-                  33;
-              final awayProb =
-                  (p['awayProb'] is int
-                      ? p['awayProb'] as int
-                      : int.tryParse(p['awayProb']?.toString() ?? '')) ??
-                  34;
-
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '1: $homeProb%',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 10,
-                        ),
-                      ),
-                      Text(
-                        'X: $drawProb%',
-                        style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 10,
-                        ),
-                      ),
-                      Text(
-                        '2: $awayProb%',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 10,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: SizedBox(
-                      height: 6,
-                      child: Row(
-                        children: [
-                          Expanded(
-                            flex: homeProb.clamp(1, 100),
-                            child: Container(color: const Color(0xFFFFD700)),
-                          ),
-                          const SizedBox(width: 2),
-                          Expanded(
-                            flex: drawProb.clamp(1, 100),
-                            child: Container(color: Colors.white24),
-                          ),
-                          const SizedBox(width: 2),
-                          Expanded(
-                            flex: awayProb.clamp(1, 100),
-                            child: Container(color: const Color(0xFF7B3FE4)),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-
-          const SizedBox(height: 12),
-
-          // AI Recommended Pick Box
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF221834),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF3F2B66)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.auto_awesome_rounded,
-                            color: Color(0xFFFFD700),
-                            size: 14,
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              'AI Tip: ${p['tip']}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '@ ${p['odds']}',
-                      style: const TextStyle(
-                        color: Color(0xFFFFD700),
-                        fontWeight: FontWeight.w900,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  p['reasoning'] as String,
-                  style: const TextStyle(color: Colors.white60, fontSize: 11),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          // Add to Betslip Button
-          SizedBox(
-            width: double.infinity,
-            height: 40,
-            child: ElevatedButton.icon(
-              onPressed: () {
-                setState(() {
-                  if (isSelected) {
-                    _selectedOddsKeys.remove(id);
-                    _selectedTicketItems.remove(id);
-                  } else {
-                    _selectedOddsKeys.add(id);
-                    final oddsVal =
-                        double.tryParse(p['odds']?.toString() ?? '') ?? 0;
-                    final confVal =
-                        int.tryParse(
-                          p['confidence']?.toString().replaceAll('%', '') ??
-                              '70',
-                        ) ??
-                        70;
-                    _selectedTicketItems[id] = TicketSelectionModel(
-                      fixtureId: id,
-                      predictionId: id,
-                      homeTeam: p['homeTeam']?.toString() ?? '',
-                      awayTeam: p['awayTeam']?.toString() ?? '',
-                      leagueName: p['league']?.toString() ?? '',
-                      matchTime: p['time']?.toString() ?? '',
-                      marketType: _mapPredictionToMarketType(
-                        p['tip']?.toString() ?? '1X2',
-                      ),
-                      selection: p['tip']?.toString() ?? '1',
-                      odds: oddsVal,
-                      confidence: confVal,
-                    );
-                  }
-                });
-              },
-              icon: Icon(
-                isSelected ? Icons.check_circle : Icons.add_circle_outline,
-                size: 16,
-              ),
-              label: Text(
-                isSelected ? 'Added to Betslip' : 'Add AI Tip to Betslip',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isSelected
-                    ? const Color(0xFFFFD700)
-                    : const Color(0xFF2B1F43),
-                foregroundColor: isSelected
-                    ? const Color(0xFF0D0B12)
-                    : Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  side: BorderSide(
-                    color: isSelected
-                        ? const Color(0xFFFFD700)
-                        : const Color(0xFF4A3470),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    ).animate().fadeIn(duration: 350.ms, delay: (idx * 50).ms);
   }
 
   // --- FEEDS SCREEN ---
@@ -10437,7 +10429,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
-                                'Odds: ${ticket.totalOdds.toStringAsFixed(2)}',
+                                'Odds: ${ticketOddsLabel(ticket.totalOdds)}',
                                 style: const TextStyle(
                                   color: Color(0xFFFFD700),
                                   fontSize: 11,
@@ -10527,7 +10519,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
-                                  sel.odds.toStringAsFixed(2),
+                                  ticketOddsLabel(sel.odds),
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 11,
@@ -10859,7 +10851,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
-                                'Odds ${pick.odds.toStringAsFixed(2)}',
+                                'Odds ${ticketOddsLabel(pick.odds)}',
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 11,

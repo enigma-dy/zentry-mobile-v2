@@ -280,7 +280,7 @@ class _BookingsScreenState extends State<BookingsScreen> {
               children: [
                 _metric('${booking.itemCount}', 'Picks'),
                 const SizedBox(width: 22),
-                _metric(booking.totalOdds.toStringAsFixed(2), 'Total odds'),
+                _metric(ticketOddsLabel(booking.totalOdds), 'Total odds'),
                 const Spacer(),
                 IconButton(
                   tooltip: 'Copy booking code',
@@ -471,7 +471,7 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: _summaryCard(
-                      booking.totalOdds.toStringAsFixed(2),
+                      ticketOddsLabel(booking.totalOdds),
                       'Total odds',
                       Icons.trending_up_rounded,
                     ),
@@ -597,7 +597,7 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                selection.odds.toStringAsFixed(2),
+                ticketOddsLabel(selection.odds),
                 style: const TextStyle(
                   color: Color(0xFFFFD700),
                   fontWeight: FontWeight.w900,

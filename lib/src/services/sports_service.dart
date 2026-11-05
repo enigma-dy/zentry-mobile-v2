@@ -27,10 +27,90 @@ class SportsException implements Exception {
 class SportsService {
   final String baseUrl;
   final http.Client _client;
+  final Duration predictionTimeout;
+  final Duration predictionCacheTtl;
+  final _predictionResponses =
+      <String, ({DateTime expires, Map<String, dynamic> data})>{};
+  final _predictionRequests = <String, Future<Map<String, dynamic>>>{};
 
-  SportsService({String? baseUrl, http.Client? client})
-    : baseUrl = baseUrl ?? _getDefaultBaseUrl(),
-      _client = client ?? LoggingClient();
+  SportsService({
+    String? baseUrl,
+    http.Client? client,
+    this.predictionTimeout = const Duration(seconds: 15),
+    this.predictionCacheTtl = const Duration(seconds: 30),
+  }) : baseUrl = baseUrl ?? _getDefaultBaseUrl(),
+       _client = client ?? LoggingClient();
+
+  void clearPredictionCache() => _predictionResponses.clear();
+
+  Future<Map<String, dynamic>> _getPredictionPayload(
+    Uri uri, {
+    http.Client? client,
+  }) async {
+    final httpClient = client ?? _client;
+    final key =
+        '${SessionManager.instance.accessToken}|${identityHashCode(httpClient)}|$uri';
+    final cached = _predictionResponses[key];
+    if (cached != null && DateTime.now().isBefore(cached.expires)) {
+      return Map<String, dynamic>.from(cached.data);
+    }
+    final existing = _predictionRequests[key];
+    if (existing != null) return Map<String, dynamic>.from(await existing);
+    final request = () async {
+      final response = await httpClient
+          .get(uri, headers: _headers)
+          .timeout(
+            predictionTimeout,
+            onTimeout: () => throw SportsException(
+              'Predictions are taking longer to load. Please try again.',
+              statusCode: 408,
+            ),
+          );
+      if (response.statusCode == 403 &&
+          response.body.contains('error code: 1010')) {
+        throw SportsException(
+          'API access was blocked by the site security service. Please try again or contact support.',
+          statusCode: 403,
+        );
+      }
+      final raw = _parseResponse(response)['data'];
+      final data = raw is Map
+          ? Map<String, dynamic>.from(raw)
+          : <String, dynamic>{'items': [], 'total': 0, 'loading': false};
+      final mappingPending = (data['items'] as List? ?? const []).any(
+        (item) =>
+            item is Map &&
+            item['sporty_sync_reason'] == 'fixture_snapshot_unavailable',
+      );
+      if (data['loading'] != true &&
+          !mappingPending &&
+          (data['message'] == null || data['message'] == '') &&
+          predictionCacheTtl > Duration.zero) {
+        final now = DateTime.now();
+        _predictionResponses.removeWhere(
+          (_, value) => !now.isBefore(value.expires),
+        );
+        if (_predictionResponses.length >= 64) {
+          _predictionResponses.remove(_predictionResponses.keys.first);
+        }
+        final ttl =
+            data['total'] == 0 &&
+                predictionCacheTtl > const Duration(seconds: 10)
+            ? const Duration(seconds: 10)
+            : predictionCacheTtl;
+        _predictionResponses[key] = (expires: now.add(ttl), data: data);
+      }
+      return data;
+    }();
+    _predictionRequests[key] = request;
+    try {
+      return Map<String, dynamic>.from(await request);
+    } finally {
+      if (identical(_predictionRequests[key], request)) {
+        _predictionRequests.remove(key);
+      }
+    }
+  }
 
   static String _getDefaultBaseUrl() {
     return AppConfig.apiBaseUrl;
@@ -74,11 +154,8 @@ class SportsService {
       final data = jsonMap['data'];
       if (data is List) {
         return data
-            .where((item) => item is Map)
-            .map(
-              (item) =>
-                  SportModel.fromJson(Map<String, dynamic>.from(item as Map)),
-            )
+            .whereType<Map>()
+            .map((item) => SportModel.fromJson(Map<String, dynamic>.from(item)))
             .toList();
       }
       return [];
@@ -114,10 +191,9 @@ class SportsService {
       final data = jsonMap['data'];
       if (data is List) {
         return data
-            .where((item) => item is Map)
+            .whereType<Map>()
             .map(
-              (item) =>
-                  LeagueModel.fromJson(Map<String, dynamic>.from(item as Map)),
+              (item) => LeagueModel.fromJson(Map<String, dynamic>.from(item)),
             )
             .toList();
       }
@@ -312,10 +388,9 @@ class SportsService {
       final data = jsonMap['data'];
       if (data is List) {
         return data
-            .where((item) => item is Map)
+            .whereType<Map>()
             .map(
-              (item) =>
-                  FixtureModel.fromJson(Map<String, dynamic>.from(item as Map)),
+              (item) => FixtureModel.fromJson(Map<String, dynamic>.from(item)),
             )
             .toList();
       }
@@ -551,11 +626,9 @@ class SportsService {
         items = jsonMap['data'] as List;
       }
       return items
-          .where((item) => item is Map)
+          .whereType<Map>()
           .map(
-            (item) => PredictionModel.fromJson(
-              Map<String, dynamic>.from(item as Map),
-            ),
+            (item) => PredictionModel.fromJson(Map<String, dynamic>.from(item)),
           )
           .where((item) => item.prediction.isNotEmpty)
           .toList();
@@ -608,7 +681,9 @@ class SportsService {
     final payload = jsonEncode({
       'platform': platform,
       'title': title,
-      'selections': selections.map((s) => s.toJson()).toList(),
+      'selections': {
+        for (final selection in selections) selection.uniqueKey: selection,
+      }.values.map((s) => s.toJson()).toList(),
     });
 
     final response = await httpClient.post(
@@ -650,7 +725,9 @@ class SportsService {
     final payload = jsonEncode({
       'platform': platform,
       'title': title,
-      'selections': selections.map((s) => s.toJson()).toList(),
+      'selections': {
+        for (final selection in selections) selection.uniqueKey: selection,
+      }.values.map((s) => s.toJson()).toList(),
     });
 
     final response = await httpClient.post(
@@ -668,6 +745,7 @@ class SportsService {
 
   /// Unified prediction page feed with market tags and comprehensive filters
   Future<Map<String, dynamic>> getPredictionFeed({
+    String? section,
     String? tag,
     String? sport,
     String? market,
@@ -688,17 +766,21 @@ class SportsService {
       'page': page.toString(),
       'page_size': pageSize.toString(),
     };
+    if (section != null && section.isNotEmpty) queryParams['section'] = section;
     if (tag != null && tag.isNotEmpty && tag != 'All') queryParams['tag'] = tag;
     if (sport != null && sport.isNotEmpty) queryParams['sport'] = sport;
     if (market != null && market.isNotEmpty) queryParams['market'] = market;
     if (source != null && source.isNotEmpty) queryParams['source'] = source;
     if (isPopular != null) queryParams['is_popular'] = isPopular.toString();
-    if (minOdds != null && minOdds > 0)
+    if (minOdds != null && minOdds > 0) {
       queryParams['min_odds'] = minOdds.toString();
-    if (maxOdds != null && maxOdds > 0)
+    }
+    if (maxOdds != null && maxOdds > 0) {
       queryParams['max_odds'] = maxOdds.toString();
-    if (minConfidence != null && minConfidence > 0)
+    }
+    if (minConfidence != null && minConfidence > 0) {
       queryParams['min_confidence'] = minConfidence.toString();
+    }
     if (date != null && date.isNotEmpty) queryParams['date'] = date;
     if (league != null && league.isNotEmpty) queryParams['league'] = league;
     if (query != null && query.isNotEmpty) queryParams['query'] = query;
@@ -708,15 +790,7 @@ class SportsService {
     final uri = Uri.parse(
       '$baseUrl/api/v1/predictions/feed',
     ).replace(queryParameters: queryParams);
-    final response = await httpClient.get(uri, headers: _headers);
-    final jsonMap = _parseResponse(response);
-    final data = jsonMap['data'];
-    if (data is Map<String, dynamic>) {
-      return data;
-    } else if (data is Map) {
-      return Map<String, dynamic>.from(data);
-    }
-    return {'items': [], 'tags': [], 'total': 0};
+    return _getPredictionPayload(uri, client: httpClient);
   }
 
   /// Permanently cached daily RatingBet market feed.
@@ -736,16 +810,7 @@ class SportsService {
         if (date != null && date.isNotEmpty) 'date': date,
       },
     );
-    final response = await (client ?? _client).get(uri, headers: _headers);
-    final jsonMap = _parseResponse(response);
-    final data = jsonMap['data'];
-    return data is Map
-        ? Map<String, dynamic>.from(data)
-        : <String, dynamic>{
-            'items': <dynamic>[],
-            'markets': <dynamic>[],
-            'total': 0,
-          };
+    return _getPredictionPayload(uri, client: client);
   }
 
   /// Get active market tags with counts for pill navigation
@@ -772,14 +837,16 @@ class SportsService {
     String? date,
     int page = 1,
     int pageSize = 20,
-  }) async {
-    return getPredictionFeed(
-      tag: 'Player Props',
-      query: query,
-      date: date,
-      page: page,
-      pageSize: pageSize,
+  }) {
+    final uri = Uri.parse('$baseUrl/api/v1/predictions/player-props').replace(
+      queryParameters: {
+        'page': '$page',
+        'page_size': '$pageSize',
+        if (query != null && query.isNotEmpty) 'query': query,
+        if (date != null && date.isNotEmpty) 'date': date,
+      },
     );
+    return _getPredictionPayload(uri);
   }
 
   /// Shortcut for Popular predictions from Scores24
@@ -797,15 +864,7 @@ class SportsService {
         if (date != null && date.isNotEmpty) 'date': date,
       },
     );
-    final response = await httpClient.get(url, headers: _headers);
-    final jsonMap = _parseResponse(response);
-    final data = jsonMap['data'];
-    if (data is Map<String, dynamic>) {
-      return data;
-    } else if (data is Map) {
-      return Map<String, dynamic>.from(data);
-    }
-    return {'items': [], 'tags': [], 'total': 0};
+    return _getPredictionPayload(url, client: httpClient);
   }
 
   /// Shortcut for Ice Hockey predictions from Scores24
@@ -823,13 +882,7 @@ class SportsService {
         if (date != null && date.isNotEmpty) 'date': date,
       },
     );
-    final response = await httpClient.get(url, headers: _headers);
-    final jsonMap = _parseResponse(response);
-    final data = jsonMap['data'];
-    if (data is Map<String, dynamic>) {
-      return data;
-    }
-    return {'items': [], 'tags': [], 'total': 0};
+    return _getPredictionPayload(url, client: httpClient);
   }
 
   /// Shortcut for 2+ Odds predictions
@@ -862,14 +915,10 @@ class SportsService {
         if (date != null && date.isNotEmpty) 'date': date,
       },
     );
-    final response = await _client.get(uri, headers: _headers);
-    final data = _parseResponse(response)['data'];
-    return data is Map
-        ? Map<String, dynamic>.from(data)
-        : <String, dynamic>{'items': [], 'tags': [], 'total': 0};
+    return _getPredictionPayload(uri);
   }
 
-  /// Generates a genuine accumulator close to the requested combined odds.
+  /// Legacy ZAI source bundles or RatingBet market accumulators.
   Future<Map<String, dynamic>> getAccumulatorPredictions({
     double targetOdds = 2.0,
     int minConfidence = 75,
@@ -877,16 +926,59 @@ class SportsService {
   }) async {
     final uri = Uri.parse('$baseUrl/api/v1/predictions/accumulators').replace(
       queryParameters: {
-        'target_odds': targetOdds.toStringAsFixed(2),
+        'target_odds': targetOdds.toString(),
         'min_confidence': minConfidence.toString(),
         if (date != null && date.isNotEmpty) 'date': date,
       },
     );
-    final response = await _client.get(uri, headers: _headers);
+    final response = await _client
+        .get(uri, headers: _authenticatedHeaders)
+        .timeout(const Duration(seconds: 45));
     final data = _parseResponse(response)['data'];
     return data is Map
         ? Map<String, dynamic>.from(data)
-        : <String, dynamic>{'items': [], 'tags': [], 'total': 0};
+        : <String, dynamic>{'items': [], 'groups': [], 'total': 0};
+  }
+
+  Future<Map<String, dynamic>> getZaiVipPredictions({String? date}) async {
+    final uri = Uri.parse('$baseUrl/api/v1/predictions/zai-odds-vip').replace(
+      queryParameters: {
+        'min_confidence': '75',
+        if (date != null && date.isNotEmpty) 'date': date,
+      },
+    );
+    final response = await _client
+        .get(uri, headers: _authenticatedHeaders)
+        .timeout(const Duration(seconds: 20));
+    final data = _parseResponse(response)['data'];
+    if (data is! Map) return {'items': [], 'groups': [], 'total_pages': 1};
+    return {
+      ...Map<String, dynamic>.from(data),
+      'items': <dynamic>[],
+      'groups': data['bundles'] ?? [],
+      'total_pages': 1,
+    };
+  }
+
+  Future<Map<String, dynamic>> getZaiMarketLists({
+    String? date,
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/predictions/zai-markets').replace(
+      queryParameters: {
+        'page': '$page',
+        'page_size': '$pageSize',
+        if (date != null && date.isNotEmpty) 'date': date,
+      },
+    );
+    final response = await _client
+        .get(uri, headers: _authenticatedHeaders)
+        .timeout(const Duration(seconds: 20));
+    final data = _parseResponse(response)['data'];
+    return data is Map
+        ? Map<String, dynamic>.from(data)
+        : {'items': [], 'groups': [], 'total_pages': 1};
   }
 
   Future<Map<String, dynamic>> getTvCatalog() async {
@@ -923,10 +1015,14 @@ class SportsService {
   /// Forebet value-odds feed ported from the legacy backend.
   Future<List<Map<String, dynamic>>> getValueOdds({
     bool refresh = false,
+    String? date,
   }) async {
-    final uri = Uri.parse(
-      '$baseUrl/api/v1/value-odds',
-    ).replace(queryParameters: {if (refresh) 'refresh': 'true'});
+    final uri = Uri.parse('$baseUrl/api/v1/value-odds').replace(
+      queryParameters: {
+        if (refresh) 'refresh': 'true',
+        if (date != null && date.isNotEmpty) 'date': date,
+      },
+    );
     final response = await _client.get(uri, headers: _authenticatedHeaders);
     final data = _parseResponse(response)['data'];
     return data is List
@@ -1148,7 +1244,10 @@ class SportsService {
     dynamic errors;
 
     if (decoded is Map<String, dynamic>) {
-      message = decoded['message'] as String? ?? message;
+      message =
+          decoded['message']?.toString() ??
+          decoded['error']?.toString() ??
+          message;
       errors = decoded['errors'];
     }
 
