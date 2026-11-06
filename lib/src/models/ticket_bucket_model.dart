@@ -76,7 +76,11 @@ class TicketSelectionModel {
     final market = code('sporty_market_id', 'market_id');
     final outcome = code('sporty_outcome_id', 'outcome_id');
     final price = double.tryParse(sporty['odds']?.toString() ?? '');
-    final sourcePrice = double.tryParse(item['odds']?.toString() ?? '') ?? 0;
+    final rawSourcePrice = double.tryParse(item['odds']?.toString() ?? '');
+    final sourcePrice =
+        rawSourcePrice != null && rawSourcePrice.isFinite && rawSourcePrice > 1
+        ? rawSourcePrice
+        : 0.0;
     return TicketSelectionModel(
       bookmakers: books,
       fixtureId: item['fixture_id']?.toString(),

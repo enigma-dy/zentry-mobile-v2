@@ -1330,6 +1330,18 @@ class HomeProbabilityReview {
 }
 
 String predictionConfidenceLabel(Map<String, dynamic> item) {
+  final display = item['extra'];
+  if (display is Map && display['probability_display'] == 'prediction_only') {
+    return 'Prediction';
+  }
+  if (display is Map && display['probability_display'] == 'forebet') {
+    final value = double.tryParse(item['probability']?.toString() ?? '');
+    return display['probability_source'] == 'forebet' &&
+            display['probability_kind'] == 'model' &&
+            value != null && value.isFinite && value >= 0 && value <= 100
+        ? '${value.round()}% Forebet'
+        : 'Prediction';
+  }
   if ((item['source'] ?? item['provider']) == 'betexplorer') {
     final extra = item['extra'];
     if (extra is! Map ||
@@ -1431,11 +1443,11 @@ HomeProbabilityReview? homePredictionProbabilityReview(
 String predictionBookmakerAvailability(Map<String, dynamic> item) =>
     switch (item['sporty_sync_reason']) {
       'fixture_not_listed' => 'Fixture unavailable on SportyBet',
-      'outcome_not_in_current_snapshot' => 'Market unavailable on SportyBet',
-      'prematch_price_not_verified' => 'Prematch odds unavailable',
-      'fixture_snapshot_unavailable' => 'Odds temporarily unavailable',
+      'outcome_not_in_current_snapshot' => 'SportyBet selection not mapped',
+      'prematch_price_not_verified' => 'SportyBet selection not mapped',
+      'fixture_snapshot_unavailable' => 'SportyBet sync temporarily unavailable',
       _ =>
         item['match_reason'] != null && item['match_reason'] != ''
             ? 'Fixture could not be matched'
-            : 'Bookmaker odds unavailable',
+            : 'SportyBet selection not mapped',
     };

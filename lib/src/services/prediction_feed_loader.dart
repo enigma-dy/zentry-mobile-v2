@@ -54,16 +54,29 @@ Map<String, dynamic> preservePredictionBookingIds(
   Map<String, dynamic> incoming,
 ) {
   if (previous == null) return incoming;
-  String identity(Map row) => [
-    'sport_id',
-    'source',
-    'id',
-    'home_team',
-    'away_team',
-    'match_time',
-    'market',
-    'selection',
-  ].map((key) => row[key]?.toString() ?? '').join('|');
+  String identity(Map row) {
+    final fixture = row['fixture_id']?.toString() ?? '';
+    final kickoff = DateTime.tryParse(row['match_time']?.toString() ?? '');
+    // IDs and providers can change when the same pick is deduplicated. Keep
+    // event, date and complete selection as the identity instead.
+    return [
+      row['sport_id'],
+      if (fixture.isNotEmpty) fixture else row['home_team'],
+      if (fixture.isEmpty) row['away_team'],
+      kickoff?.toUtc().toIso8601String() ?? row['match_time'],
+      row['market'],
+      row['selection'],
+    ].map((value) => (value?.toString() ?? '').trim().toLowerCase()).join('|');
+  }
+
+  String code(Map row, String field) {
+    final flat = row['sporty_$field']?.toString() ?? '';
+    if (flat.isNotEmpty) return flat;
+    final bookmakers = row['bookmakers'];
+    final sporty = bookmakers is Map ? bookmakers['sporty'] : null;
+    return sporty is Map ? sporty[field]?.toString() ?? '' : '';
+  }
+
   Iterable<Map> rows(Map data) sync* {
     for (final field in ['items', 'top_items']) {
       if (data[field] is List) yield* (data[field] as List).whereType<Map>();
@@ -78,26 +91,48 @@ Map<String, dynamic> preservePredictionBookingIds(
   final known = {for (final row in rows(previous)) identity(row): row};
   Map<String, dynamic> retain(Map row) {
     final current = Map<String, dynamic>.from(row);
-    if (row['sporty_sync_reason'] != 'fixture_snapshot_unavailable')
-      return current;
     final old = known[identity(row)];
     final kickoff = DateTime.tryParse(row['match_time']?.toString() ?? '');
     if (old == null || kickoff == null || !kickoff.isAfter(DateTime.now())) {
       return current;
     }
-    final status = (row['match_status'] ?? '').toString().toLowerCase();
-    if (!{'', 'prematch', 'ns', 'not started'}.contains(status)) return current;
-    const fields = ['sporty_event_id', 'sporty_market_id', 'sporty_outcome_id'];
-    if (fields.any((field) => (old[field]?.toString() ?? '').isEmpty))
+    final reason = row['sporty_sync_reason'];
+    final sameEvent =
+        code(row, 'event_id').isNotEmpty &&
+        code(row, 'event_id') == code(old, 'event_id');
+    if (reason != 'fixture_snapshot_unavailable' &&
+        !(sameEvent &&
+            {
+              'outcome_not_in_current_snapshot',
+              'prematch_price_not_verified',
+            }.contains(reason))) {
       return current;
+    }
+    final status = (row['match_status'] ?? '').toString().trim().toLowerCase();
+    if (!{
+      '',
+      'prematch',
+      'pending',
+      'upcoming',
+      'scheduled',
+      'ns',
+      'not started',
+    }.contains(status))
+      return current;
+    const fields = ['event_id', 'market_id', 'outcome_id'];
+    if (fields.any((field) => code(old, field).isEmpty)) return current;
     if (fields.any(
       (field) =>
-          (row[field]?.toString() ?? '').isNotEmpty && row[field] != old[field],
+          code(row, field).isNotEmpty && code(row, field) != code(old, field),
     )) {
       return current;
     }
-    for (final field in [...fields, 'sporty_specifier']) {
-      if (old[field] != null) current[field] = old[field];
+    if (code(row, 'specifier').isNotEmpty &&
+        code(row, 'specifier') != code(old, 'specifier')) {
+      return current;
+    }
+    for (final field in [...fields, 'specifier']) {
+      current['sporty_$field'] = code(old, field);
     }
     if ((current['fixture_id']?.toString() ?? '').isEmpty) {
       current['fixture_id'] = old['fixture_id'];

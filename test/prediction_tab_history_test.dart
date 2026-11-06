@@ -20,6 +20,19 @@ Map<String, dynamic> pick() => {
 };
 
 void main() {
+  test(
+    'an invalid optional price cannot disable a complete SportyBet selection',
+    () {
+      for (final price in [1, 0.5, -1, 'NaN', 'Infinity', null]) {
+        final item = TicketSelectionModel.fromPrediction({
+          ...pick(),
+          'odds': price,
+        });
+        expect(item.canAddToBucket, true);
+        expect(item.odds, 0);
+      }
+    },
+  );
   test('returning to each tab keeps its successful list after a timeout', () {
     final history = PredictionTabHistory();
     for (final tab in ['popular', 'best', 'props']) {
@@ -105,6 +118,85 @@ void main() {
       }
     },
   );
+  test(
+    'provider replacement and a missing quote keep the same booking identity',
+    () {
+      final previous = pick();
+      final incoming = {
+        ...pick(),
+        'id': 'replacement-source-pick',
+        'source': 'stats24',
+        'match_time': '2099-11-06T19:00:00+01:00',
+        'match_status': 'scheduled',
+        'sporty_market_id': '',
+        'sporty_outcome_id': '',
+        'sporty_sync_reason': 'outcome_not_in_current_snapshot',
+      };
+      final result = preservePredictionBookingIds(
+        {
+          'items': [previous],
+        },
+        {
+          'items': [incoming],
+        },
+      );
+      final row = Map<String, dynamic>.from((result['items'] as List).single);
+      expect(TicketSelectionModel.fromPrediction(row).canAddToBucket, true);
+      expect(row['odds'], 0);
+      expect(row['source'], 'stats24');
+    },
+  );
+  test('nested booking IDs survive without copying a stale price', () {
+    final previous = {
+      ...pick(),
+      'sporty_event_id': '',
+      'sporty_market_id': '',
+      'sporty_outcome_id': '',
+      'bookmakers': {
+        'sporty': {
+          'event_id': 'sr:match:1',
+          'market_id': '18',
+          'outcome_id': '12',
+          'specifier': 'total=1.5',
+          'odds': 1.8,
+        },
+      },
+    };
+    final incoming = {
+      ...pick(),
+      'sporty_event_id': '',
+      'sporty_market_id': '',
+      'sporty_outcome_id': '',
+      'sporty_sync_reason': 'fixture_snapshot_unavailable',
+    };
+    final result = preservePredictionBookingIds(
+      {
+        'items': [previous],
+      },
+      {
+        'items': [incoming],
+      },
+    );
+    final row = Map<String, dynamic>.from((result['items'] as List).single);
+    expect(TicketSelectionModel.fromPrediction(row).canAddToBucket, true);
+    expect(row['odds'], 0);
+    for (final conflict in [
+      {'fixture_id': 'different'},
+      {'sporty_specifier': 'total=2.5'},
+    ]) {
+      final result = preservePredictionBookingIds(
+        {
+          'items': [previous],
+        },
+        {
+          'items': [
+            {...incoming, ...conflict},
+          ],
+        },
+      );
+      expect((result['items'] as List).single['sporty_outcome_id'], '');
+    }
+  });
   test(
     'started matches remain unaddable and session changes clear all rows',
     () {
