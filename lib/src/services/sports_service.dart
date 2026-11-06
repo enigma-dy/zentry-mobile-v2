@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
@@ -1050,36 +1051,6 @@ class SportsService {
               .map((item) => Map<String, dynamic>.from(item))
               .toList()
         : <Map<String, dynamic>>[];
-  }
-
-  /// Analyze a booking code with SlipIQ risk diagnostics
-  /// `POST /api/v1/slip-analysis/betcode`
-  Future<Map<String, dynamic>> analyzeSlipBookingCode({
-    required String bookingCode,
-    String platform = 'sportybetng',
-    bool deepAnalysis = false,
-    bool allowAISwap = false,
-    http.Client? client,
-  }) async {
-    final httpClient = client ?? _client;
-    final url = Uri.parse('$baseUrl/api/v1/slip-analysis/betcode');
-    final payload = jsonEncode({
-      'platform': platform,
-      'booking_code': bookingCode,
-      'deep_analysis': deepAnalysis,
-      'allow_ai_swap_predictions': allowAISwap,
-    });
-    final response = await httpClient.post(
-      url,
-      headers: _authenticatedHeaders,
-      body: payload,
-    );
-    final jsonMap = _parseResponse(response);
-    final data = jsonMap['data'];
-    if (data is Map<String, dynamic>) {
-      return data;
-    }
-    throw SportsException('Failed to analyze betting slip');
   }
 
   /// Get Community Tickets Feed (Accumulator slips created by users)

@@ -4,12 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import 'auth_screen.dart';
 import 'services/prediction_feed_loader.dart';
 import 'ads/ad_slot.dart';
 import 'live_tv/live_tv_screen.dart';
 import 'brand.dart';
-import 'slip_agent_screen.dart';
 import 'profile_screen.dart';
 import 'coin_shop_screen.dart';
 import 'contact_us_dialog.dart';
@@ -1751,7 +1751,6 @@ class _HomeScreenState extends State<HomeScreen> {
     'Predictions',
     'Feeds',
     'Live TV',
-    'SlipIQ',
     'Code Convert',
   ];
   final List<String> _filterPills = ['Today', 'Top Leagues', 'Countries'];
@@ -2655,10 +2654,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     // Main Dynamic Tab Content
                     Expanded(child: _buildBodyContent(constraints)),
-                    if ({0, 1, 4, 9}.contains(_topTabNavIndex))
+                    if ({0, 1, 4, 8}.contains(_topTabNavIndex))
                       AdSlot(
                         key: ValueKey('page-ad-$_topTabNavIndex'),
-                        placement: {4, 9}.contains(_topTabNavIndex)
+                        placement: {4, 8}.contains(_topTabNavIndex)
                             ? AdPlacement.prediction
                             : _topTabNavIndex == 1
                             ? AdPlacement.match
@@ -3727,10 +3726,8 @@ class _HomeScreenState extends State<HomeScreen> {
       case 6:
         return LiveTvScreen(service: _sportsService);
       case 7:
-        return SlipAgentScreen(baseUrl: _sportsService.baseUrl);
-      case 8:
         return _buildCodeConvertScreen(constraints);
-      case 9:
+      case 8:
         return _buildPopularPredictionsScreen(constraints);
       default:
         return _buildHomeSportsbookScreen(constraints);
@@ -3930,7 +3927,7 @@ class _HomeScreenState extends State<HomeScreen> {
               setState(() => _topTabNavIndex = index);
               if (index == 1) {
                 _loadLiveSportsData();
-              } else if (index == 4 || index == 9) {
+              } else if (index == 4 || index == 8) {
                 _loadPopularPredictions(_popularFilterIndex);
               }
             },
@@ -9876,31 +9873,16 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            // 5. SlipIQ (AI Booking Code Analyzer)
+            // 5. Code Convert (Cross-Bookie Converter)
             Expanded(
               child: _buildBottomNavItem(
                 index: 4,
-                label: 'SlipIQ',
-                icon: Icons.analytics_rounded,
-                onTap: () {
-                  setState(() {
-                    _bottomNavIndex = 4;
-                    _topTabNavIndex = 7;
-                  });
-                },
-              ),
-            ),
-
-            // 6. Code Convert (Cross-Bookie Converter)
-            Expanded(
-              child: _buildBottomNavItem(
-                index: 5,
                 label: 'Code Convert',
                 icon: Icons.published_with_changes_rounded,
                 onTap: () {
                   setState(() {
-                    _bottomNavIndex = 5;
-                    _topTabNavIndex = 8;
+                    _bottomNavIndex = 4;
+                    _topTabNavIndex = 7;
                   });
                 },
               ),
