@@ -6,6 +6,128 @@ bool predictionFeedHasContent(Map<String, dynamic> data) => [
   'top_items',
 ].any((key) => data[key] is List && (data[key] as List).isNotEmpty);
 
+/// Keep each visited tab's successful response while a transient refresh fails.
+/// Callers scope keys by date/market and clear this history on session changes.
+class PredictionTabHistory {
+  final _tabs = <String, Map<String, dynamic>>{};
+
+  void clear() => _tabs.clear();
+
+  Map<String, dynamic>? read(String key) {
+    final value = _tabs[key];
+    return value == null ? null : Map<String, dynamic>.from(value);
+  }
+
+  Map<String, dynamic>? failure(String key, Object error) {
+    final previous = read(key);
+    if (previous == null || !predictionFeedHasContent(previous)) return null;
+    return {
+      ...previous,
+      'retry_pending': true,
+      'refresh_error': error.toString(),
+    };
+  }
+
+  Map<String, dynamic> accept(String key, Map<String, dynamic> incoming) {
+    final previous = read(key);
+    if (!predictionFeedHasContent(incoming) &&
+        incoming['loading'] == true &&
+        previous != null &&
+        predictionFeedHasContent(previous)) {
+      return {...previous, 'retry_pending': true};
+    }
+    final data = preservePredictionBookingIds(previous, incoming);
+    if (predictionFeedHasContent(data)) {
+      if (_tabs.length >= 32 && !_tabs.containsKey(key)) {
+        _tabs.remove(_tabs.keys.first);
+      }
+      _tabs[key] = data;
+    } else {
+      _tabs.remove(key);
+    }
+    return data;
+  }
+}
+
+Map<String, dynamic> preservePredictionBookingIds(
+  Map<String, dynamic>? previous,
+  Map<String, dynamic> incoming,
+) {
+  if (previous == null) return incoming;
+  String identity(Map row) => [
+    'sport_id',
+    'source',
+    'id',
+    'home_team',
+    'away_team',
+    'match_time',
+    'market',
+    'selection',
+  ].map((key) => row[key]?.toString() ?? '').join('|');
+  Iterable<Map> rows(Map data) sync* {
+    for (final field in ['items', 'top_items']) {
+      if (data[field] is List) yield* (data[field] as List).whereType<Map>();
+    }
+    for (final group
+        in (data['groups'] as List? ?? const []).whereType<Map>()) {
+      if (group['items'] is List)
+        yield* (group['items'] as List).whereType<Map>();
+    }
+  }
+
+  final known = {for (final row in rows(previous)) identity(row): row};
+  Map<String, dynamic> retain(Map row) {
+    final current = Map<String, dynamic>.from(row);
+    if (row['sporty_sync_reason'] != 'fixture_snapshot_unavailable')
+      return current;
+    final old = known[identity(row)];
+    final kickoff = DateTime.tryParse(row['match_time']?.toString() ?? '');
+    if (old == null || kickoff == null || !kickoff.isAfter(DateTime.now())) {
+      return current;
+    }
+    final status = (row['match_status'] ?? '').toString().toLowerCase();
+    if (!{'', 'prematch', 'ns', 'not started'}.contains(status)) return current;
+    const fields = ['sporty_event_id', 'sporty_market_id', 'sporty_outcome_id'];
+    if (fields.any((field) => (old[field]?.toString() ?? '').isEmpty))
+      return current;
+    if (fields.any(
+      (field) =>
+          (row[field]?.toString() ?? '').isNotEmpty && row[field] != old[field],
+    )) {
+      return current;
+    }
+    for (final field in [...fields, 'sporty_specifier']) {
+      if (old[field] != null) current[field] = old[field];
+    }
+    if ((current['fixture_id']?.toString() ?? '').isEmpty) {
+      current['fixture_id'] = old['fixture_id'];
+    }
+    current['sportybet_available'] = true;
+    return current;
+  }
+
+  return {
+    ...incoming,
+    for (final field in ['items', 'top_items'])
+      if (incoming[field] is List)
+        field: (incoming[field] as List).whereType<Map>().map(retain).toList(),
+    if (incoming['groups'] is List)
+      'groups': (incoming['groups'] as List)
+          .whereType<Map>()
+          .map(
+            (group) => {
+              ...group,
+              if (group['items'] is List)
+                'items': (group['items'] as List)
+                    .whereType<Map>()
+                    .map(retain)
+                    .toList(),
+            },
+          )
+          .toList(),
+  };
+}
+
 /// Empty is a valid response. The server's loading flag controls background
 /// polling; do not turn a sport without predictions into an endless spinner.
 Future<Map<String, dynamic>> loadPredictionFeed(

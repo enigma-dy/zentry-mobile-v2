@@ -170,6 +170,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _popularPredictionPage = 1;
   final ScrollController _predictionScrollController = ScrollController();
   Map<String, dynamic>? _predictionSnapshot;
+  final _predictionTabs = PredictionTabHistory();
   bool _predictionLoadingMore = false;
   String? _predictionMoreError;
   int _predictionGeneration = 0;
@@ -187,6 +188,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     _predictionTokenAtLoad = SessionManager.instance.accessToken;
     _predictionAccessAtLoad = access;
+    _predictionTabs.clear();
     _loadPopularPredictions(_popularFilterIndex);
   }
 
@@ -383,6 +385,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  String get _predictionTabKey =>
+      '$_homeDate|$_popularFilterIndex|${_popularFilterIndex == 3
+          ? _footballMarketIndex
+          : _popularFilterIndex == _ratingBetFilterIndex
+          ? _ratingBetMarketIndex
+          : _popularFilterIndex >= 5
+          ? _otherSportSubTabIndex
+          : 0}';
+
   void _loadPopularPredictions([int filterIndex = 0, bool background = false]) {
     _predictionRetryTimer?.cancel();
     final version = ++_predictionGeneration;
@@ -392,23 +403,33 @@ class _HomeScreenState extends State<HomeScreen> {
         _popularFilterLabels.length - 1,
       );
       _popularPredictionPage = 1;
-      if (!background) _predictionSnapshot = null;
+      final tabKey = _predictionTabKey;
+      _predictionSnapshot = _predictionTabs.read(tabKey);
       _predictionLoadingMore = false;
       _predictionMoreError = null;
       _popularPredictionsFuture = _requestPredictionPage(1).then(
         (data) {
           if (mounted && version == _predictionGeneration) {
-            _predictionSnapshot = data;
-            if (data['loading'] == true || data['retry_pending'] == true) {
+            _predictionSnapshot = _predictionTabs.accept(tabKey, data);
+            if (_predictionSnapshot!['loading'] == true ||
+                _predictionSnapshot!['retry_pending'] == true) {
               _schedulePredictionRetry(version);
             }
+            return _predictionSnapshot!;
           }
           return data;
         },
         onError: (Object error, StackTrace stack) {
-          if (background && _predictionSnapshot != null) {
+          final terminalAccessError =
+              error is SportsException &&
+              (error.statusCode == 401 || error.statusCode == 403);
+          if (terminalAccessError) _predictionTabs.clear();
+          final previous = terminalAccessError
+              ? null
+              : _predictionTabs.failure(tabKey, error);
+          if (previous != null) {
             _schedulePredictionRetry(version);
-            return {..._predictionSnapshot!, 'retry_pending': true};
+            return previous;
           }
           return <String, dynamic>{
             'items': <dynamic>[],
@@ -607,7 +628,10 @@ class _HomeScreenState extends State<HomeScreen> {
       };
       setState(
         () => _popularPredictionsFuture = Future.value(
-          _predictionSnapshot = updated,
+          _predictionSnapshot = _predictionTabs.accept(
+            _predictionTabKey,
+            updated,
+          ),
         ),
       );
     } catch (_) {
@@ -7920,7 +7944,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
           // Prediction Feed List via FutureBuilder
           FutureBuilder<Map<String, dynamic>>(
+            key: ValueKey(_predictionTabKey),
             future: _popularPredictionsFuture,
+            initialData: _predictionSnapshot,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting &&
                   !predictionFeedHasContent(
