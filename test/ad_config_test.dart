@@ -15,7 +15,7 @@ void main() {
       expect(
         AdConfig.usesOnlyDemoUnits([
           AdConfig.androidProductionBanner,
-          AdConfig.androidInterstitial,
+          AdConfig.androidTestBanner,
         ]),
         isFalse,
       );

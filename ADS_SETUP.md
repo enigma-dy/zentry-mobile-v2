@@ -7,25 +7,24 @@ The screenshot confirms `ca-app-pub-5393431054971185/4275619406` is a banner uni
 Android release builds use it for the existing banner placements. Debug/profile
 builds use Google's sample banner; iOS keeps its own sample units. IDs are
 centralized in `lib/src/ads/ad_config.dart`; ordinary pages and lists use banners.
-Live TV may show a preloaded test
-interstitial after an explicit Watch tap, before the player opens. Rewarded ads
-are not shown and no reward benefits are invented.
+Advertising is banner-only. Live TV Watch taps open playback without requesting
+or showing an interstitial. Native and rewarded ads are not configured.
 
 | Placement | Free / signed out | Active Pro |
 | --- | --- | --- |
 | Home and match pages | Ads | No ads |
 | Predictions | Ads | No ads |
 | Live TV channel and fixture lists | Ads | Ads |
-| Live TV Watch tap | Pre-playback ad, if ready | Pre-playback ad, if ready |
+| Live TV Watch tap | No full-screen ad | No full-screen ad |
 | During playback | No app ads | No app ads |
 
 Eligibility uses the existing user VIP tier and expiry (`hasPredictionAccess`).
 An upgrade updates visible ad slots immediately. Live TV list banners appear
-between blocks of up to 12 cards, with at most three slots. The player routes contain no app ad widgets. A Watch tap can show one preloaded
-interstitial; playback opens only after it is dismissed. If an ad is not ready
-or fails, watching proceeds immediately. A two-minute frequency cap avoids
-repeated ads during server retries. There are no in-play timers or halftime
-triggers because a reliable break signal is not available.
+between blocks of up to 12 cards, with at most three slots. The player routes
+contain no app ad widgets. The former native pre-watch interstitial implementation
+and unused full-screen ad unit IDs have been removed. Existing Watch navigation
+hooks use the no-op implementation on every platform; no ad SDK initialization
+is triggered by those hooks.
 Ad failures leave playback and navigation usable. Desktop targets show no ads.
 
 ## Mobile testing and consent
@@ -41,8 +40,7 @@ units for the current platform. It is automatically disabled for Android release
 builds because they contain a production banner. Configure Privacy & messaging
 for this app in AdMob: production ads load only when UMP's `canRequestAds()`
 allows them. Live ad delivery/account approval was not verified from this
-workspace. Interstitial and rewarded formats need their own production unit IDs
-before those formats can earn revenue. A banner unit cannot replace them.
+workspace. The supplied banner is the only production unit used.
 
 ## Flutter web / AdSense
 
@@ -66,8 +64,8 @@ IDs. AdMob test IDs cannot be used as AdSense publisher IDs. Example:
 Optional placement overrides: `ADSENSE_HOME_SLOT`, `ADSENSE_MATCH_SLOT`,
 `ADSENSE_PREDICTION_SLOT`, `ADSENSE_LIVE_TV_SLOT`, `ADSENSE_PLAYER_SLOT`.
 The DOM units use fixed 320x50 or 728x90 display slots; they are not disguised as
-play buttons or overlaid on content. Pre-watch interstitials use the SDK's standard dismissal controls; standard
-AdSense display code is left unmodified.
+play buttons or overlaid on content. Standard AdSense display code is left
+unmodified.
 
 Approve the website in AdSense, configure Google's consent messages for the
 applicable regions, and publish the exact `ads.txt` / `app-ads.txt` publisher

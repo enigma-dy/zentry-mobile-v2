@@ -12,20 +12,12 @@ class AdConfig {
   static const androidBanner = kReleaseMode
       ? androidProductionBanner
       : androidTestBanner;
-  // Other formats/platforms still use their own Google sample units.
+  // iOS keeps its own Google sample banner until an iOS unit is supplied.
   static const iosAppId = 'ca-app-pub-3940256099942544~1458002511';
-  static const androidInterstitial = 'ca-app-pub-3940256099942544/1033173712';
-  static const androidRewarded = 'ca-app-pub-3940256099942544/5224354917';
   static const iosBanner = 'ca-app-pub-3940256099942544/2934735716';
-  static const iosInterstitial = 'ca-app-pub-3940256099942544/4411468910';
-  static const iosRewarded = 'ca-app-pub-3940256099942544/1712485313';
   static const _sampleUnits = {
     'ca-app-pub-3940256099942544/6300978111',
-    'ca-app-pub-3940256099942544/1033173712',
-    'ca-app-pub-3940256099942544/5224354917',
     'ca-app-pub-3940256099942544/2934735716',
-    'ca-app-pub-3940256099942544/4411468910',
-    'ca-app-pub-3940256099942544/1712485313',
   };
 
   // Derive the consent fallback from the actual configured units, so adding
@@ -35,8 +27,8 @@ class AdConfig {
 
   static bool get demoUnitsOnly => usesOnlyDemoUnits(
     defaultTargetPlatform == TargetPlatform.iOS
-        ? const [iosBanner, iosInterstitial, iosRewarded]
-        : const [androidBanner, androidInterstitial, androidRewarded],
+        ? const [iosBanner]
+        : const [androidBanner],
   );
   static const webTestMode = bool.fromEnvironment(
     'ADS_WEB_TEST_MODE',
