@@ -101,7 +101,7 @@ void main() {
   );
 
   test(
-    'Popular threshold uses preferences while local Betmines supplies the quote',
+    'Popular threshold uses preferences while Forebet supplies the quote',
     () {
       final item = <String, dynamic>{
         'source': 'betexplorer',
@@ -109,7 +109,7 @@ void main() {
         'probability': 38,
         'confidence': 38,
         'extra': {
-          'probability_source': 'betmines',
+          'probability_source': 'forebet',
           'probability_kind': 'model',
         },
         'probability_review': {'reason': 'model_market_disagreement'},
@@ -120,7 +120,7 @@ void main() {
           ...item,
           'extra': {'probability_kind': 'unavailable'},
         }),
-        '\u2014',
+        isEmpty,
       );
       expect(predictionConfidenceLabel({...item, 'probability': 0}), '0%');
     },

@@ -8547,6 +8547,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final isSelected = _selectedOddsKeys.contains(id);
     final isHockey = sport.toLowerCase().contains('hockey');
     final canAddToBetslip = ticketSelection.canAddToBucket;
+    final confidenceLabel = predictionConfidenceLabel(item);
 
     return InkWell(
       onTap: () {
@@ -8644,28 +8645,30 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFD700).withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: const Color(0xFFFFD700).withValues(alpha: 0.35),
+                if (confidenceLabel.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFD700).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: const Color(0xFFFFD700).withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Text(
+                      confidenceLabel,
+                      style: const TextStyle(
+                        color: Color(0xFFFFD700),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                   ),
-                  child: Text(
-                    predictionConfidenceLabel(item),
-                    style: const TextStyle(
-                      color: Color(0xFFFFD700),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
+                ],
               ],
             ),
 

@@ -1332,26 +1332,26 @@ class HomeProbabilityReview {
 String predictionConfidenceLabel(Map<String, dynamic> item) {
   final display = item['extra'];
   if (display is Map && display['probability_display'] == 'prediction_only') {
-    return 'Prediction';
+    return '';
   }
   if (display is Map && display['probability_display'] == 'forebet') {
     final value = double.tryParse(item['probability']?.toString() ?? '');
     return display['probability_source'] == 'forebet' &&
             display['probability_kind'] == 'model' &&
             value != null && value.isFinite && value >= 0 && value <= 100
-        ? '${value.round()}% Forebet'
-        : 'Prediction';
+        ? '${value.round()}%'
+        : '';
   }
   if ((item['source'] ?? item['provider']) == 'betexplorer') {
     final extra = item['extra'];
     if (extra is! Map ||
         extra['probability_source'] != 'forebet' ||
         extra['probability_kind'] != 'model')
-      return '\u2014';
+      return '';
     final value = double.tryParse(item['probability']?.toString() ?? '');
     return value != null && value.isFinite && value >= 0 && value <= 100
         ? '${value.round()}%'
-        : '\u2014';
+        : '';
   }
   if (item['probability_review'] is Map &&
       (item['probability_review'] as Map).isNotEmpty) {

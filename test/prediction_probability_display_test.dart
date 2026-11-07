@@ -12,7 +12,7 @@ void main() {
       'confidence': 99,
       'extra': {'probability_display': 'prediction_only'},
     };
-    expect(predictionConfidenceLabel(item), 'Prediction');
+    expect(predictionConfidenceLabel(item), isEmpty);
     expect(item['selection'], 'Home Team To Win');
   });
   test('Popular still displays its verified Forebet probability', () {
@@ -39,15 +39,34 @@ void main() {
             'probability_kind': 'model',
           },
         }),
-        '38% Forebet',
+        '38%',
       );
       expect(
         predictionConfidenceLabel({
           'probability': 99,
           'extra': {'probability_display': 'forebet'},
         }),
-        'Prediction',
+        isEmpty,
       );
     },
   );
+  test('Missing or invalid Forebet percentages leave the badge blank', () {
+    for (final value in [null, '', 'NaN', double.infinity, -1, 101]) {
+      expect(
+        predictionConfidenceLabel({
+          'probability': value,
+          'extra': {
+            'probability_display': 'forebet',
+            'probability_source': 'forebet',
+            'probability_kind': 'model',
+          },
+        }),
+        isEmpty,
+      );
+    }
+    expect(
+      predictionConfidenceLabel({'source': 'betexplorer', 'confidence': 95}),
+      isEmpty,
+    );
+  });
 }
