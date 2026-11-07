@@ -6,25 +6,42 @@ publisher `pub-5393431054971185`. iOS still uses Google's sample app ID.
 The screenshot confirms `ca-app-pub-5393431054971185/4275619406` is a banner unit.
 Android release builds use it for the existing banner placements. Debug/profile
 builds use Google's sample banner; iOS keeps its own sample units. IDs are
-centralized in `lib/src/ads/ad_config.dart`; ordinary pages and lists use banners.
-Advertising is banner-only. Live TV Watch taps open playback without requesting
-or showing an interstitial. Native and rewarded ads are not configured.
+centralized in `lib/src/ads/ad_config.dart`.
+
+| Android format | Production unit suffix | Placement |
+| --- | --- | --- |
+| Banner | `4275619406` | Existing home, match and prediction banners; Live TV lists |
+| Native Advanced | `3315705612` | Google's small native template after every eighth prediction card, capped at three per list; alternating Live TV list slots |
+| Interstitial | `9014754856` | Existing explicit Live TV Watch transition, only if preloaded |
+| App open | `4437215591` | Eligible foreground returns to the root page |
+
+The rewarded-interstitial screenshots are duplicates. Rewarded ads are excluded
+at the user's request: no reward unit is loaded, no reward prompt is displayed,
+and there are no changes to coin balances or the backend.
 
 | Placement | Free / signed out | Active Pro |
 | --- | --- | --- |
 | Home and match pages | Ads | No ads |
 | Predictions | Ads | No ads |
 | Live TV channel and fixture lists | Ads | Ads |
-| Live TV Watch tap | No full-screen ad | No full-screen ad |
+| Live TV Watch tap | Preloaded interstitial, if ready | Preloaded interstitial, if ready |
+| Eligible app return | App-open ad, if ready | No app-open ad |
 | During playback | No app ads | No app ads |
 
 Eligibility uses the existing user VIP tier and expiry (`hasPredictionAccess`).
 An upgrade updates visible ad slots immediately. Live TV list banners appear
 between blocks of up to 12 cards, with at most three slots. The player routes
-contain no app ad widgets. The former native pre-watch interstitial implementation
-and unused full-screen ad unit IDs have been removed. Existing Watch navigation
-hooks use the no-op implementation on every platform; no ad SDK initialization
-is triggered by those hooks.
+contain no app ad widgets. Interstitials use the existing pre-watch template and
+wait for dismissal before opening the player. Missing ads never delay playback
+while loading. App-open and interstitial formats share a two-minute cooldown and
+a single display gate, preventing stacked ads on resume or stream retries.
+App-open waits until the third app session and a background interval of at least
+30 seconds. It requires a signed-in, non-Pro user with only the root page
+visible. Pushed pages and dialogs, including video, authentication and checkout
+routes, prevent app-open display. It never shows an ad later just because a
+background load completed. Cached app-open ads expire after four hours.
+Returning from an ad click or ad privacy settings skips the next app-open
+attempt, so those interactions do not cause an extra full-screen ad.
 Ad failures leave playback and navigation usable. Desktop targets show no ads.
 
 ## Mobile testing and consent
@@ -40,7 +57,15 @@ units for the current platform. It is automatically disabled for Android release
 builds because they contain a production banner. Configure Privacy & messaging
 for this app in AdMob: production ads load only when UMP's `canRequestAds()`
 allows them. Live ad delivery/account approval was not verified from this
-workspace. The supplied banner is the only production unit used.
+workspace. All four Android formats use the supplied production units in release
+builds and Google's corresponding sample units during development. iOS retains
+its platform-specific sample units. Native cards use the plugin's built-in small
+template, with the app's dark background and gold action button.
+
+Validation: 16 ad configuration, entitlement, navigation and display-gate tests
+plus the prediction pagination/scroll integration test passed. Static analysis
+of the app entry point, ad modules and modified catalog page found no issues.
+Live ad delivery still needs verification in a rebuilt Android release app.
 
 ## Flutter web / AdSense
 

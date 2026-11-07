@@ -12,12 +12,36 @@ class AdConfig {
   static const androidBanner = kReleaseMode
       ? androidProductionBanner
       : androidTestBanner;
-  // iOS keeps its own Google sample banner until an iOS unit is supplied.
+  static const androidProductionNative =
+      'ca-app-pub-5393431054971185/3315705612';
+  static const androidProductionInterstitial =
+      'ca-app-pub-5393431054971185/9014754856';
+  static const androidProductionAppOpen =
+      'ca-app-pub-5393431054971185/4437215591';
+  static const androidNative = kReleaseMode
+      ? androidProductionNative
+      : 'ca-app-pub-3940256099942544/2247696110';
+  static const androidInterstitial = kReleaseMode
+      ? androidProductionInterstitial
+      : 'ca-app-pub-3940256099942544/1033173712';
+  static const androidAppOpen = kReleaseMode
+      ? androidProductionAppOpen
+      : 'ca-app-pub-3940256099942544/9257395921';
+  // iOS keeps its own Google sample units until iOS units are supplied.
   static const iosAppId = 'ca-app-pub-3940256099942544~1458002511';
   static const iosBanner = 'ca-app-pub-3940256099942544/2934735716';
+  static const iosNative = 'ca-app-pub-3940256099942544/3986624511';
+  static const iosInterstitial = 'ca-app-pub-3940256099942544/4411468910';
+  static const iosAppOpen = 'ca-app-pub-3940256099942544/5575463023';
   static const _sampleUnits = {
     'ca-app-pub-3940256099942544/6300978111',
     'ca-app-pub-3940256099942544/2934735716',
+    'ca-app-pub-3940256099942544/2247696110',
+    'ca-app-pub-3940256099942544/1033173712',
+    'ca-app-pub-3940256099942544/9257395921',
+    'ca-app-pub-3940256099942544/3986624511',
+    'ca-app-pub-3940256099942544/4411468910',
+    'ca-app-pub-3940256099942544/5575463023',
   };
 
   // Derive the consent fallback from the actual configured units, so adding
@@ -27,8 +51,13 @@ class AdConfig {
 
   static bool get demoUnitsOnly => usesOnlyDemoUnits(
     defaultTargetPlatform == TargetPlatform.iOS
-        ? const [iosBanner]
-        : const [androidBanner],
+        ? const [iosBanner, iosNative, iosInterstitial, iosAppOpen]
+        : const [
+            androidBanner,
+            androidNative,
+            androidInterstitial,
+            androidAppOpen,
+          ],
   );
   static const webTestMode = bool.fromEnvironment(
     'ADS_WEB_TEST_MODE',

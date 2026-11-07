@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/session_manager.dart';
 import 'ad_config.dart';
 import 'ad_policy.dart';
+import 'native_ad.dart';
 import 'ad_platform_stub.dart'
     if (dart.library.io) 'ad_platform_mobile.dart'
     if (dart.library.js_interop) 'ad_platform_web.dart';
@@ -13,10 +14,8 @@ export 'ad_platform_stub.dart'
     if (dart.library.js_interop) 'ad_platform_web.dart'
     show AdPrivacyButton;
 
-typedef AdContentBuilder = Widget Function(
-  BuildContext context,
-  VoidCallback? onDismiss,
-);
+typedef AdContentBuilder =
+    Widget Function(BuildContext context, VoidCallback? onDismiss);
 
 class AdSlot extends StatefulWidget {
   const AdSlot({
@@ -24,9 +23,11 @@ class AdSlot extends StatefulWidget {
     required this.placement,
     this.dismissible = false,
     this.contentBuilder,
+    this.useNativeTemplate = false,
   });
   final AdPlacement placement;
   final bool dismissible;
+  final bool useNativeTemplate;
   // Allows placement/entitlement tests without loading an advertising SDK.
   final AdContentBuilder? contentBuilder;
 
@@ -52,7 +53,12 @@ class _AdSlotState extends State<AdSlot> {
           ? () => setState(() => _dismissed = true)
           : null;
       return widget.contentBuilder?.call(context, close) ??
-          PlatformAdBanner(placement: widget.placement, onDismiss: close);
+          (widget.useNativeTemplate
+              ? PlatformNativeAd(placement: widget.placement, onDismiss: close)
+              : PlatformAdBanner(
+                  placement: widget.placement,
+                  onDismiss: close,
+                ));
     },
   );
 }

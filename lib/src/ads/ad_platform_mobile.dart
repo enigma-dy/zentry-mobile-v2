@@ -7,6 +7,7 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'ad_config.dart';
 import 'ad_frame.dart';
 import 'mobile_ads_service.dart';
+import 'full_screen_ad_policy.dart';
 
 class PlatformAdBanner extends StatefulWidget {
   const PlatformAdBanner({super.key, required this.placement, this.onDismiss});
@@ -61,6 +62,7 @@ class _PlatformAdBannerState extends State<PlatformAdBanner> {
         size: size,
         request: const AdRequest(),
         listener: BannerAdListener(
+          onAdClicked: (_) => fullScreenAdGate.skipNextAppOpen(),
           onAdLoaded: (ad) {
             if (!mounted || generation != _generation) {
               ad.dispose();

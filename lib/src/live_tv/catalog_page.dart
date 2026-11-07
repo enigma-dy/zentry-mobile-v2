@@ -309,6 +309,7 @@ class _CatalogPageState extends State<CatalogPage> with WidgetsBindingObserver {
                               child: AdSlot(
                                 key: ValueKey('live-tv-ad-$section'),
                                 placement: AdPlacement.liveTvList,
+                                useNativeTemplate: section.isOdd,
                               ),
                             ),
                           ),

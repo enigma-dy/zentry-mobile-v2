@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'src/startup_gate.dart';
+import 'src/ads/ad_app_lifecycle.dart';
 
 import 'src/services/session_manager.dart';
 import 'src/services/app_config.dart';
@@ -22,6 +23,9 @@ class ZentryApp extends StatelessWidget {
     return MaterialApp(
       title: 'Zentry Predict',
       debugShowCheckedModeBanner: false,
+      navigatorObservers: [adRouteObserver],
+      builder: (_, child) =>
+          AdAppLifecycle(child: child ?? const SizedBox.shrink()),
       theme: ThemeData(
         brightness: Brightness.dark,
         colorScheme: ColorScheme.fromSeed(

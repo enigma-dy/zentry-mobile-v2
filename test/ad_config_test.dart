@@ -7,18 +7,28 @@ void main() {
     expect(kReleaseMode, isFalse);
     expect(AdConfig.androidBanner, AdConfig.androidTestBanner);
     expect(AdConfig.androidBanner, isNot(AdConfig.androidProductionBanner));
+    expect(AdConfig.androidNative, isNot(AdConfig.androidProductionNative));
+    expect(
+      AdConfig.androidInterstitial,
+      isNot(AdConfig.androidProductionInterstitial),
+    );
+    expect(AdConfig.androidAppOpen, isNot(AdConfig.androidProductionAppOpen));
   });
 
   test(
     'a production or unknown unit cannot receive the demo consent bypass',
     () {
-      expect(
-        AdConfig.usesOnlyDemoUnits([
-          AdConfig.androidProductionBanner,
-          AdConfig.androidTestBanner,
-        ]),
-        isFalse,
-      );
+      for (final liveUnit in [
+        AdConfig.androidProductionBanner,
+        AdConfig.androidProductionNative,
+        AdConfig.androidProductionInterstitial,
+        AdConfig.androidProductionAppOpen,
+      ]) {
+        expect(
+          AdConfig.usesOnlyDemoUnits([liveUnit, AdConfig.androidTestBanner]),
+          isFalse,
+        );
+      }
       expect(
         AdConfig.usesOnlyDemoUnits(['ca-app-pub-3940256099942544/unknown']),
         isFalse,

@@ -5,11 +5,13 @@ import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import 'ad_config.dart';
+import 'full_screen_ad_policy.dart';
 
 class MobileAdsService extends ChangeNotifier {
   MobileAdsService._();
   static final instance = MobileAdsService._();
   Future<bool>? _initialization;
+  bool _sdkInitialized = false;
   bool privacyOptionsRequired = false;
   bool canLoadAds = false;
 
@@ -21,6 +23,7 @@ class MobileAdsService extends ChangeNotifier {
 
   Future<bool> ensureInitialized() {
     if (!supported) return Future.value(false);
+    if (canLoadAds) return Future.value(true);
     return _initialization ??= _initialize();
   }
 
@@ -53,34 +56,38 @@ class MobileAdsService extends ChangeNotifier {
       // Consent/SDK failures must never block navigation or live playback.
     }
     try {
-      final allowed = await ConsentInformation.instance.canRequestAds();
-      // Only known Google demo units may run when UMP cannot authorize ads.
-      // Release Android banners use the publisher's unit and require consent.
-      if (!allowed && !AdConfig.demoUnitsOnly) return false;
-      await MobileAds.instance.initialize();
-      canLoadAds = true;
-      privacyOptionsRequired =
-          await ConsentInformation.instance
-              .getPrivacyOptionsRequirementStatus() ==
-          PrivacyOptionsRequirementStatus.required;
-      notifyListeners();
-      return true;
+      return await _refreshPermission();
     } catch (error) {
       debugPrint('Advertising unavailable: $error');
       return false;
     }
   }
 
+  Future<bool> _refreshPermission() async {
+    privacyOptionsRequired =
+        await ConsentInformation.instance
+            .getPrivacyOptionsRequirementStatus() ==
+        PrivacyOptionsRequirementStatus.required;
+    final allowed =
+        await ConsentInformation.instance.canRequestAds() ||
+        AdConfig.demoUnitsOnly;
+    if (allowed && !_sdkInitialized) {
+      await MobileAds.instance.initialize();
+      _sdkInitialized = true;
+    }
+    canLoadAds = allowed && _sdkInitialized;
+    notifyListeners();
+    return canLoadAds;
+  }
+
   Future<void> showPrivacyOptions() async {
     if (!supported || !privacyOptionsRequired) return;
+    fullScreenAdGate.skipNextAppOpen();
     final done = Completer<void>();
     ConsentForm.showPrivacyOptionsForm((_) {
       if (!done.isCompleted) done.complete();
     });
     await done.future;
-    canLoadAds =
-        await ConsentInformation.instance.canRequestAds() ||
-        AdConfig.demoUnitsOnly;
-    notifyListeners();
+    await _refreshPermission();
   }
 }

@@ -8514,6 +8514,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildScores24PopularCard(Map<String, dynamic> item, int idx) {
+    final card = _buildScores24PopularCardBody(item, idx);
+    if (idx >= 24 || (idx + 1) % 8 != 0) {
+      return card;
+    }
+    return Column(
+      children: [
+        card,
+        const AdSlot(
+          placement: AdPlacement.prediction,
+          useNativeTemplate: true,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildScores24PopularCardBody(Map<String, dynamic> item, int idx) {
     final ticketSelection = TicketSelectionModel.fromPrediction(item);
     final id = ticketSelection.uniqueKey;
     final initialFixture = FixtureModel.fromPredictionFeed(item);
