@@ -43,13 +43,15 @@ void main() {
       }).canAddToBucket,
       isFalse,
     );
-    expect(
-      TicketSelectionModel.fromPrediction({
-        ...item,
-        'odds': double.nan,
-      }).canAddToBucket,
-      isFalse,
-    );
+    // An invalid source quote becomes an unknown price. A verified selection
+    // remains bookable without odds, just like an absent source quote.
+    final invalidPricePick = TicketSelectionModel.fromPrediction({
+      ...item,
+      'odds': double.nan,
+    });
+    expect(invalidPricePick.canAddToBucket, isTrue);
+    expect(invalidPricePick.odds, 0);
+    expect(invalidPricePick.toJson()['odds'], 0);
     final priced = TicketSelectionModel.fromPrediction({...item, 'odds': 1.5});
     expect(ticketSelectionsTotalOdds([priced, pick]), 0);
     expect(ticketSelectionsTotalOdds([priced, priced]), 2.25);
