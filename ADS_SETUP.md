@@ -1,9 +1,13 @@
 # Advertising
 
-Android and iOS use the official `google_mobile_ads` plugin and Google's sample
-app/ad unit IDs. Android's manifest contains
-`ca-app-pub-3940256099942544~3347511713`. Banner, interstitial and rewarded test
-IDs are centralized in `lib/src/ads/ad_config.dart`; ordinary pages and lists use banners. Live TV may show a preloaded test
+Android and iOS use the official `google_mobile_ads` plugin. Android's manifest
+contains the supplied app ID `ca-app-pub-5393431054971185~4713556926` for
+publisher `pub-5393431054971185`. iOS still uses Google's sample app ID.
+The screenshot confirms `ca-app-pub-5393431054971185/4275619406` is a banner unit.
+Android release builds use it for the existing banner placements. Debug/profile
+builds use Google's sample banner; iOS keeps its own sample units. IDs are
+centralized in `lib/src/ads/ad_config.dart`; ordinary pages and lists use banners.
+Live TV may show a preloaded test
 interstitial after an explicit Watch tap, before the player opens. Rewarded ads
 are not shown and no reward benefits are invented.
 
@@ -32,11 +36,13 @@ generate revenue. iOS uses its own Google sample app and unit IDs.
 
 The service requests Google's UMP consent information before loading ads and
 provides an Ad privacy choices entry in the menu when Google requires it.
-Google's demonstration app has no publisher privacy message, so the service
-allows only these hard-coded Google sample units if UMP cannot complete. When
-switching to real IDs, disable `demoUnitsOnly`, configure AdMob Privacy &
-messaging, replace the native app IDs as well as the ad unit IDs, and configure
-the current iOS SKAdNetwork entries from Google's integration guide.
+The consent fallback is computed from an explicit allowlist of Google sample
+units for the current platform. It is automatically disabled for Android release
+builds because they contain a production banner. Configure Privacy & messaging
+for this app in AdMob: production ads load only when UMP's `canRequestAds()`
+allows them. Live ad delivery/account approval was not verified from this
+workspace. Interstitial and rewarded formats need their own production unit IDs
+before those formats can earn revenue. A banner unit cannot replace them.
 
 ## Flutter web / AdSense
 

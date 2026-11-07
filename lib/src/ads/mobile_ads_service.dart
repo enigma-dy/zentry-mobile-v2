@@ -54,8 +54,8 @@ class MobileAdsService extends ChangeNotifier {
     }
     try {
       final allowed = await ConsentInformation.instance.canRequestAds();
-      // The supplied Google sample app has no publisher consent message. This
-      // fallback is limited to the hard-coded Google demonstration units above.
+      // Only known Google demo units may run when UMP cannot authorize ads.
+      // Release Android banners use the publisher's unit and require consent.
       if (!allowed && !AdConfig.demoUnitsOnly) return false;
       await MobileAds.instance.initialize();
       canLoadAds = true;
