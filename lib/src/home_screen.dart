@@ -8540,6 +8540,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final matchTime = item['match_time']?.toString() ?? '';
     final market = item['market']?.toString() ?? '';
     final selection = item['selection']?.toString() ?? '';
+    final propDetails = item['player_prop_details'];
+    final confirmedStarter = item['is_player_prop'] == true &&
+        propDetails is Map &&
+        propDetails['lineup_status'] == 'confirmed_starter';
     final odds = (item['odds'] is num)
         ? (item['odds'] as num).toDouble()
         : (double.tryParse(item['odds']?.toString() ?? '') ?? 0);
@@ -8720,8 +8724,13 @@ class _HomeScreenState extends State<HomeScreen> {
                             children: [
                               Text(
                                 '$market: $selection',
-                                style: const TextStyle(
-                                  color: Colors.white,
+                                semanticsLabel: confirmedStarter
+                                    ? '$market: $selection. Confirmed starter'
+                                    : '$market: $selection',
+                                style: TextStyle(
+                                  color: confirmedStarter
+                                      ? const Color(0xFF69F0AE)
+                                      : Colors.white,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 13,
                                 ),
