@@ -23,6 +23,7 @@ import 'services/app_config.dart';
 import 'models/sport_model.dart';
 import 'models/league_model.dart';
 import 'models/fixture_model.dart';
+import 'models/player_prop_categories.dart';
 import 'models/fixture_duel_model.dart';
 import 'models/fpl_duel_model.dart';
 import 'models/home_fixture_groups.dart';
@@ -167,6 +168,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _liveDataError;
 
   int _popularFilterIndex = 0;
+  int _playerPropCategoryIndex = 0;
   int _popularPredictionPage = 1;
   final ScrollController _predictionScrollController = ScrollController();
   Map<String, dynamic>? _predictionSnapshot;
@@ -386,7 +388,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String get _predictionTabKey =>
-      '$_homeDate|$_popularFilterIndex|${_popularFilterIndex == 3
+      '$_homeDate|$_popularFilterIndex|${_popularFilterIndex == 2
+          ? _playerPropCategoryIndex
+          : _popularFilterIndex == 3
           ? _footballMarketIndex
           : _popularFilterIndex == _ratingBetFilterIndex
           ? _ratingBetMarketIndex
@@ -476,6 +480,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (index == 2) {
       return _retryPredictionLoad(
         () => _sportsService.getPlayerProps(
+          statType: playerPropCategories[_playerPropCategoryIndex].statType,
           date: _homeDate,
           page: page,
           pageSize: 20,
@@ -7902,6 +7907,18 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
 
           const SizedBox(height: 16),
+
+          if (_popularFilterIndex == 2) ...[
+            _buildPredictionMarketTabs(
+              labels: playerPropCategories.map((category) => category.label).toList(),
+              selectedIndex: _playerPropCategoryIndex,
+              onSelected: (index) {
+                _playerPropCategoryIndex = index;
+                _loadPopularPredictions(2);
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
 
           if (_popularFilterIndex == 3) ...[
             _buildPredictionMarketTabs(

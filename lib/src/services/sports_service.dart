@@ -834,6 +834,7 @@ class SportsService {
 
   /// Shortcut for Player Props predictions
   Future<Map<String, dynamic>> getPlayerProps({
+    String? statType,
     String? query,
     String? date,
     int page = 1,
@@ -841,6 +842,7 @@ class SportsService {
   }) {
     final uri = Uri.parse('$baseUrl/api/v1/predictions/player-props').replace(
       queryParameters: {
+        if (statType != null && statType.isNotEmpty) 'stat_type': statType,
         'page': '$page',
         'page_size': '$pageSize',
         if (query != null && query.isNotEmpty) 'query': query,
